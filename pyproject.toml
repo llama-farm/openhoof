@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openhoof"
+version = "0.1.0"
+description = "Agentic AI that kicks into action - event-driven agents with persistent memory"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [
+    { name = "LlamaFarm", email = "hello@llamafarm.ai" }
+]
+keywords = ["ai", "agents", "llm", "llamafarm", "automation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "httpx>=0.26.0",
+    "aiofiles>=23.2.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "python-multipart>=0.0.6",
+    "websockets>=12.0",
+    "pyyaml>=6.0",
+    "jinja2>=3.1.0",
+    "croniter>=2.0.0",
+    "rich>=13.7.0",
+    "typer>=0.9.0",
+    "watchfiles>=0.21.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
+    "mypy>=1.8.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/llama-farm/openhoof"
+Documentation = "https://github.com/llama-farm/openhoof/tree/main/docs"
+Repository = "https://github.com/llama-farm/openhoof"
+Issues = "https://github.com/llama-farm/openhoof/issues"
+
+[project.scripts]
+openhoof = "openhoof.cli.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["openhoof"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+strict = false
