@@ -1,8 +1,17 @@
-# 🐴 OpenHoof
+# 🦙 OpenHoof
 
 **Agentic AI that kicks into action.**
 
+<p align="center">
+  <img src="docs/openhoof-logo.png" alt="OpenHoof - A cool llama with sunglasses and a bedazzled hoof" width="300">
+</p>
+
+> *"Why have claws when you can have hooves?"*  
+> — Ancient LlamaFarm Proverb
+
 OpenHoof is a standalone, extensible platform for running AI agents that persist across sessions, respond to events, and coordinate with each other. Built to work with [LlamaFarm](https://github.com/llama-farm/llamafarm) for local inference, but adaptable to any LLM backend.
+
+Some say it was inspired by a certain [claw-based project](https://github.com/anthropics/claude-code)... but we believe hooves are simply more elegant. Plus, llamas don't scratch — they *kick*.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -36,6 +45,7 @@ OpenHoof is a standalone, extensible platform for running AI agents that persist
 - **🖥️ Web Dashboard** — Monitor agents, review activity, approve actions
 - **🔌 LlamaFarm Integration** — Works with any LlamaFarm project for inference
 - **📡 Real-time Events** — WebSocket streaming for live updates
+- **🦙 100% More Llama** — No claws required
 
 ## 🚀 Quick Start
 
@@ -267,8 +277,18 @@ tools:
 ## 🌟 Why "OpenHoof"?
 
 - **Open** — Open source, extensible, integrates with anything
-- **Hoof** — Agents that "kick" into action (like a horse)
-- A playful nod to [OpenClaw](https://github.com/anthropics/openclaw), the inspiration for this project
+- **Hoof** — Agents that "kick" into action (llamas kick, they don't claw 🦙)
+- Part of the [LlamaFarm](https://github.com/llama-farm) ecosystem
+
+### A Note on Claws vs Hooves
+
+You may have heard of [Claude Code](https://github.com/anthropics/claude-code) (née OpenClaw), Anthropic's excellent coding agent. Great project! Sharp claws! Very pointy!
+
+But consider: **claws scratch**. They're for climbing trees and looking threatening.
+
+**Hooves**, on the other hand, are for *getting things done*. Llamas carry cargo across mountains. They kick predators into next week. They look fabulous doing it.
+
+Plus, our hooves are *bedazzled*. ✨
 
 ## 📜 License
 
@@ -276,10 +296,12 @@ Apache 2.0
 
 ## 🙏 Acknowledgments
 
-- [OpenClaw](https://github.com/anthropics/openclaw) — The workspace/agent patterns that inspired this
+- [Claude Code](https://github.com/anthropics/claude-code) — The workspace/agent patterns that inspired this (we come in peace 🦙🤝🐻)
 - [LlamaFarm](https://github.com/llama-farm/llamafarm) — Local LLM inference
 - Built with ❤️ for the Air Force and anyone who needs reliable local AI agents
 
 ---
 
 **Ready to let your agents kick into action?** [Get Started →](docs/GETTING_STARTED.md)
+
+*No llamas were harmed in the making of this framework. Several were bedazzled.*
