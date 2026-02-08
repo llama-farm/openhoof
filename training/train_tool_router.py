@@ -316,7 +316,12 @@ def train(
     print(f"\n🚀 Starting training ({len(formatted)} examples, {epochs} epochs)...")
     stats = trainer.train()
     print(f"\n✅ Training complete!")
-    print(f"   Loss: {stats.training_loss:.4f}")
+    # unsloth-mlx returns a dict, unsloth returns TrainOutput
+    if isinstance(stats, dict):
+        final_loss = stats.get("training_loss", stats.get("loss", 0))
+    else:
+        final_loss = getattr(stats, "training_loss", 0)
+    print(f"   Loss: {final_loss:.4f}")
 
     # Save the LoRA adapter
     lora_path = Path(output_dir) / "lora_adapter"
@@ -347,7 +352,7 @@ def train(
         "batch_size": batch_size,
         "lora_rank": lora_rank,
         "training_examples": len(formatted),
-        "final_loss": stats.training_loss,
+        "final_loss": final_loss,
         "output_dir": str(output_dir),
         "format_style": format_style,
     }
