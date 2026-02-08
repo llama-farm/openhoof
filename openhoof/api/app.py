@@ -18,7 +18,7 @@ from ..tools import ToolRegistry
 from ..tools.builtin import register_builtin_tools
 
 from .dependencies import set_manager
-from .routes import agents, chat, activity, approvals, health, triggers, logs, tools
+from .routes import agents, chat, activity, approvals, health, triggers, logs, tools, training
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +106,7 @@ def create_app() -> FastAPI:
     app.include_router(triggers.router, prefix="/api", tags=["triggers"])
     app.include_router(logs.router, prefix="/api", tags=["logs"])
     app.include_router(tools.router, tags=["tools"])
+    app.include_router(training.router, tags=["training"])
     
     # WebSocket for real-time events
     @app.websocket("/api/events")
