@@ -12,8 +12,8 @@ class InferenceConfig(BaseModel):
     type: str = "llamafarm"  # llamafarm, openai, ollama
     base_url: str = "http://localhost:14345"
     namespace: str = "atmosphere"
-    project: str = "agents"
-    default_model: Optional[str] = None
+    project: str = "openhoof"
+    default_model: Optional[str] = "qwen3-8b"
     api_key: Optional[str] = None
 
 
@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     # Inference defaults
     llamafarm_url: str = "http://localhost:14345"
     llamafarm_namespace: str = "atmosphere"
-    llamafarm_project: str = "agents"
+    llamafarm_project: str = "openhoof"
     
     class Config:
         env_prefix = ""

@@ -10,6 +10,14 @@ interface Agent {
   description: string;
   status: string;
   workspace_dir: string;
+  tools?: string[];
+  model?: string;
+}
+
+interface ToolAssignment {
+  name: string;
+  description: string;
+  assigned: boolean;
 }
 
 export default function AgentDetailPage() {
@@ -23,6 +31,9 @@ export default function AgentDetailPage() {
   const [fileContent, setFileContent] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [assignedTools, setAssignedTools] = useState<ToolAssignment[]>([]);
+  const [availableTools, setAvailableTools] = useState<ToolAssignment[]>([]);
+  const [toolsLoading, setToolsLoading] = useState(false);
 
   async function fetchAgent() {
     const res = await fetch(`/api/agents/${agentId}`);
@@ -75,9 +86,45 @@ export default function AgentDetailPage() {
     router.push("/agents");
   }
 
+  async function fetchTools() {
+    try {
+      const res = await fetch(`/api/tools/agents/${agentId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setAssignedTools(data.assigned_tools || []);
+        setAvailableTools(data.available_tools || []);
+      }
+    } catch (e) {
+      console.error("Failed to fetch tools:", e);
+    }
+  }
+
+  async function toggleTool(toolName: string, currentlyAssigned: boolean) {
+    setToolsLoading(true);
+    const currentTools = assignedTools.map((t) => t.name);
+    const newTools = currentlyAssigned
+      ? currentTools.filter((n) => n !== toolName)
+      : [...currentTools, toolName];
+
+    try {
+      const res = await fetch(`/api/tools/agents/${agentId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tools: newTools }),
+      });
+      if (res.ok) {
+        await fetchTools();
+      }
+    } catch (e) {
+      console.error("Failed to update tools:", e);
+    }
+    setToolsLoading(false);
+  }
+
   useEffect(() => {
     fetchAgent();
     fetchFiles();
+    fetchTools();
   }, [agentId]);
 
   if (loading) {
@@ -143,6 +190,68 @@ export default function AgentDetailPage() {
             Delete
           </button>
         </div>
+      </div>
+
+      {/* Tools Management */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-semibold">🔧 Tools</h2>
+          <span className="text-sm text-gray-500">
+            {assignedTools.length} assigned
+          </span>
+        </div>
+
+        {/* Assigned Tools */}
+        <div className="mb-4">
+          <h3 className="text-sm font-medium text-gray-700 mb-2">Assigned</h3>
+          <div className="flex flex-wrap gap-2">
+            {assignedTools.map((tool) => (
+              <button
+                key={tool.name}
+                onClick={() => toggleTool(tool.name, true)}
+                disabled={toolsLoading}
+                className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-full text-sm hover:bg-blue-100 border border-blue-200 transition-colors"
+                title={tool.description}
+              >
+                <span className="font-mono text-xs">{tool.name}</span>
+                <span className="text-blue-400 hover:text-red-500 ml-1">×</span>
+              </button>
+            ))}
+            {assignedTools.length === 0 && (
+              <span className="text-gray-400 text-sm">All tools enabled (no filter)</span>
+            )}
+          </div>
+        </div>
+
+        {/* Available (unassigned) Tools */}
+        {availableTools.length > 0 && (
+          <div>
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Available</h3>
+            <div className="flex flex-wrap gap-2">
+              {availableTools.map((tool) => (
+                <button
+                  key={tool.name}
+                  onClick={() => toggleTool(tool.name, false)}
+                  disabled={toolsLoading}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-50 text-gray-500 rounded-full text-sm hover:bg-green-50 hover:text-green-700 border border-gray-200 transition-colors"
+                  title={tool.description}
+                >
+                  <span className="text-green-400">+</span>
+                  <span className="font-mono text-xs">{tool.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {agent.model && (
+          <div className="mt-4 pt-4 border-t">
+            <span className="text-sm text-gray-500">Model: </span>
+            <span className="text-sm font-mono bg-gray-100 px-2 py-0.5 rounded">
+              {agent.model}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Workspace Editor */}

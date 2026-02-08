@@ -22,12 +22,13 @@ export default function RootLayout({
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
               <div className="flex justify-between h-16">
                 <div className="flex items-center">
-                  <span className="text-2xl mr-2">🤖</span>
-                  <span className="font-bold text-xl">Atmosphere Agents</span>
+                  <span className="text-2xl mr-2">🦙</span>
+                  <span className="font-bold text-xl">OpenHoof</span>
                 </div>
                 <div className="flex items-center space-x-4">
                   <a href="/" className="text-gray-600 hover:text-gray-900">Dashboard</a>
                   <a href="/agents" className="text-gray-600 hover:text-gray-900">Agents</a>
+                  <a href="/tools" className="text-gray-600 hover:text-gray-900">Tools</a>
                   <a href="/logs" className="text-gray-600 hover:text-gray-900">Logs</a>
                   <a href="/activity" className="text-gray-600 hover:text-gray-900">Activity</a>
                   <a href="/approvals" className="text-gray-600 hover:text-gray-900">Approvals</a>

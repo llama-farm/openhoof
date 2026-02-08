@@ -1,0 +1,57 @@
+version: v1
+name: agents
+namespace: atmosphere
+description: "OpenHoof multi-model agent inference"
+
+runtime:
+  models:
+    - name: qwen3-8b
+      description: "Main reasoning model - strong tool calling"
+      provider: universal
+      model: Qwen/Qwen3-8B-GGUF:Qwen3-8B-Q4_K_M.gguf
+      default: true
+      prompt_format: unstructured
+      prompts: [default]
+
+    - name: qwen3-1.7b
+      description: "Fast model for summaries and compaction"
+      provider: universal
+      model: unsloth/Qwen3-1.7B-GGUF:Q4_K_M
+      prompt_format: unstructured
+      prompts: [default]
+
+    - name: functiongemma
+      description: "Tiny tool-call router (experimental)"
+      provider: universal
+      model: unsloth/functiongemma-270m-it-GGUF:functiongemma-270m-it-Q8_0.gguf
+      prompt_format: unstructured
+      prompts: [tool_router]
+
+    - name: granite-3b
+      description: "IBM Granite for structured output"
+      provider: universal
+      model: ibm-granite/granite-3.3-2b-instruct-GGUF:granite-3.3-2b-instruct-Q4_K_M.gguf
+      prompt_format: unstructured
+      prompts: [default]
+
+    - name: gemma-4b
+      description: "Google Gemma for code and structured tasks"
+      provider: universal
+      model: google/gemma-3-4b-it-qat-q4_0-gguf:gemma-3-4b-it-q4_0.gguf
+      prompt_format: unstructured
+      prompts: [default]
+
+prompts:
+  - name: default
+    messages:
+      - role: system
+        content: "{{system}}"
+      - role: user
+        content: "{{user}}"
+
+  - name: tool_router
+    messages:
+      - role: system
+        content: "You are a function calling AI. Given the user's request and available tools, determine which tool(s) to call. Available tools: {{tools}}"
+      - role: user
+        content: "{{user}}"

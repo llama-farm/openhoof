@@ -16,12 +16,16 @@ class ToolCall:
     arguments: Dict[str, Any]
     
     def to_openai_format(self) -> Dict[str, Any]:
+        import json
+        args = self.arguments
+        if isinstance(args, dict):
+            args = json.dumps(args)
         return {
             "id": self.id,
             "type": "function",
             "function": {
                 "name": self.name,
-                "arguments": self.arguments if isinstance(self.arguments, str) else str(self.arguments)
+                "arguments": args
             }
         }
 
