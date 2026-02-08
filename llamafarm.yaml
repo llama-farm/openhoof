@@ -30,14 +30,14 @@ runtime:
     - name: granite-3b
       description: "IBM Granite for structured output"
       provider: universal
-      model: ibm-granite/granite-3.3-2b-instruct-GGUF:granite-3.3-2b-instruct-Q4_K_M.gguf
+      model: bartowski/ibm-granite_granite-3.3-2b-instruct-GGUF:ibm-granite_granite-3.3-2b-instruct-Q4_K_M.gguf
       prompt_format: unstructured
       prompts: [default]
 
     - name: gemma-4b
       description: "Google Gemma for code and structured tasks"
       provider: universal
-      model: google/gemma-3-4b-it-qat-q4_0-gguf:gemma-3-4b-it-q4_0.gguf
+      model: bartowski/google_gemma-3-4b-it-GGUF:google_gemma-3-4b-it-Q4_K_M.gguf
       prompt_format: unstructured
       prompts: [default]
 
