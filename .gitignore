@@ -72,3 +72,9 @@ data/
 *.temp
 /tmp/
 .venv-train/
+
+# Model weights (too large for git)
+fused_model/
+*.safetensors
+*.gguf
+.venv-train/
