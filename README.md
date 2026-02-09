@@ -45,7 +45,61 @@ Some say it was inspired by a certain [claw-based project](https://github.com/an
 - **🖥️ Web Dashboard** — Monitor agents, review activity, approve actions
 - **🔌 LlamaFarm Integration** — Works with any LlamaFarm project for inference
 - **📡 Real-time Events** — WebSocket streaming for live updates
+- **🧠 FunctionGemma Training** — LoRA fine-tune a 270M router for your tools in 3 minutes, cross-platform
 - **🦙 100% More Llama** — No claws required
+
+## 🧠 FunctionGemma Tool Router — Train Your Own
+
+OpenHoof includes a **two-stage function calling pipeline** powered by [FunctionGemma-270M](https://huggingface.co/google/functiongemma-270m-it). A tiny 270M model handles ALL tool routing in <300ms — then your bigger model only reasons about results.
+
+```
+User: "Save a note about the meeting"
+         ↓
+  FunctionGemma-270M  (550MB RAM, ~270ms)
+         ↓
+  [{"name": "memory_write", ...}]
+         ↓
+  Tool executes → Result fed to bigger model
+```
+
+### Why This Matters
+
+| Model | Accuracy | Latency | Notes |
+|-------|----------|---------|-------|
+| FunctionGemma-270M (base) | 15.4% | 203ms | Needs fine-tuning |
+| Qwen3-1.7B (as router) | 38.5% | 515ms | Too slow for edge |
+| **FunctionGemma-270M (LoRA)** | **100%** | **271ms** | 🔥 3 min training |
+
+### Train in One Command
+
+```bash
+# Mac (Apple Silicon) — uses unsloth-mlx
+python training/train_tool_router.py
+
+# Linux (CUDA) — uses unsloth
+python training/train_tool_router.py --backend cuda
+```
+
+Same script, cross-platform. LoRA fine-tuning (rank 16, alpha 32) across all 18 layers. Trains on ~226 examples in ~3 minutes on Apple Silicon. Peak memory: 2.1GB.
+
+### Continuous Learning
+
+Every tool routing decision is logged. The model improves as you use it:
+
+```bash
+# Generate synthetic training data (uses your bigger model as teacher)
+python training/pipeline.py generate --count 50
+
+# Retrain with new data
+python training/pipeline.py run
+
+# Auto-retrain only when enough new data exists
+python training/train_tool_router.py --auto --min-examples 200
+```
+
+The pipeline collects live routing decisions, tracks outcome feedback, and retrains on demand. Exports to GGUF for deployment via LlamaFarm or llama.cpp.
+
+> **Full details:** [`training/README.md`](training/README.md) · **Pipeline code:** [`openhoof/inference/function_pipeline.py`](openhoof/inference/function_pipeline.py)
 
 ## 🚀 Quick Start
 
