@@ -24,6 +24,13 @@ EVENT_HEARTBEAT_RAN = "heartbeat:ran"
 EVENT_SUBAGENT_SPAWNED = "subagent:spawned"
 EVENT_SUBAGENT_COMPLETED = "subagent:completed"
 EVENT_ACTIVITY = "activity"
+EVENT_AUTONOMY_TURN_STARTED = "autonomy:turn_started"
+EVENT_AUTONOMY_TURN_COMPLETED = "autonomy:turn_completed"
+EVENT_AUTONOMY_PRECHECK_SKIPPED = "autonomy:precheck_skipped"
+EVENT_AUTONOMY_GUARDRAIL_TRIGGERED = "autonomy:guardrail_triggered"
+EVENT_AUTONOMY_SENSOR_UPDATED = "autonomy:sensor_updated"
+EVENT_AUTONOMY_SENSOR_ERROR = "autonomy:sensor_error"
+EVENT_AUTONOMY_NOTIFICATION_PUSHED = "autonomy:notification_pushed"
 
 
 @dataclass

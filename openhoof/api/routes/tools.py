@@ -4,7 +4,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ..dependencies import get_agent_manager
+from ..dependencies import get_manager
 
 router = APIRouter(prefix="/api/tools", tags=["tools"])
 
@@ -23,7 +23,7 @@ class AgentToolsUpdate(BaseModel):
 @router.get("")
 async def list_tools() -> List[dict]:
     """List all available tools in the registry."""
-    manager = get_agent_manager()
+    manager = get_manager()
     tools = manager.tool_registry.list_tools()
 
     return [
@@ -42,7 +42,7 @@ async def list_tools() -> List[dict]:
 @router.get("/{tool_name}")
 async def get_tool(tool_name: str) -> dict:
     """Get details for a specific tool."""
-    manager = get_agent_manager()
+    manager = get_manager()
     tool = manager.tool_registry.get(tool_name)
     if not tool:
         raise HTTPException(status_code=404, detail=f"Tool not found: {tool_name}")
@@ -59,7 +59,7 @@ async def get_tool(tool_name: str) -> dict:
 @router.get("/agents/{agent_id}")
 async def get_agent_tools(agent_id: str) -> dict:
     """Get tools assigned to a specific agent."""
-    manager = get_agent_manager()
+    manager = get_manager()
     handle = await manager.get_agent(agent_id)
 
     if handle:
@@ -102,7 +102,7 @@ async def get_agent_tools(agent_id: str) -> dict:
 @router.put("/agents/{agent_id}")
 async def update_agent_tools(agent_id: str, body: AgentToolsUpdate) -> dict:
     """Update tools assigned to an agent."""
-    manager = get_agent_manager()
+    manager = get_manager()
 
     # Validate tool names
     all_tool_names = {t.name for t in manager.tool_registry.list_tools()}

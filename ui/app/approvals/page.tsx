@@ -51,7 +51,7 @@ export default function ApprovalsPage() {
         <select
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          className="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+          className="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100"
         >
           <option value="pending">Pending</option>
           <option value="approved">Approved</option>
@@ -60,8 +60,8 @@ export default function ApprovalsPage() {
       </div>
 
       {approvals.length === 0 ? (
-        <div className="bg-white rounded-lg shadow p-8 text-center">
-          <p className="text-gray-500">
+        <div className="bg-white dark:bg-gray-900 rounded-lg shadow dark:shadow-gray-900/20 p-8 text-center">
+          <p className="text-gray-500 dark:text-gray-400">
             {filter === "pending"
               ? "No pending approvals. Actions requiring approval will appear here."
               : `No ${filter} approvals.`}
@@ -70,7 +70,7 @@ export default function ApprovalsPage() {
       ) : (
         <div className="space-y-4">
           {approvals.map((approval) => (
-            <div key={approval.approval_id} className="bg-white rounded-lg shadow p-6">
+            <div key={approval.approval_id} className="bg-white dark:bg-gray-900 rounded-lg shadow dark:shadow-gray-900/20 p-6">
               <div className="flex justify-between items-start">
                 <div>
                   <div className="flex items-center space-x-2">
@@ -78,17 +78,17 @@ export default function ApprovalsPage() {
                     <span
                       className={`px-2 py-1 rounded-full text-xs ${
                         approval.status === "pending"
-                          ? "bg-yellow-100 text-yellow-800"
+                          ? "bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200"
                           : approval.status === "approved"
-                          ? "bg-green-100 text-green-800"
-                          : "bg-red-100 text-red-800"
+                          ? "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200"
+                          : "bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200"
                       }`}
                     >
                       {approval.status}
                     </span>
                   </div>
-                  <p className="text-gray-500 mt-1">{approval.description}</p>
-                  <p className="text-sm text-gray-400 mt-2">
+                  <p className="text-gray-500 dark:text-gray-400 mt-1">{approval.description}</p>
+                  <p className="text-sm text-gray-400 dark:text-gray-500 mt-2">
                     Agent: {approval.agent_id} • {new Date(approval.created_at * 1000).toLocaleString()}
                   </p>
                 </div>
@@ -109,14 +109,14 @@ export default function ApprovalsPage() {
                   </div>
                 )}
               </div>
-              
+
               {Object.keys(approval.data).length > 0 && (
                 <div className="mt-4">
                   <details className="text-sm">
-                    <summary className="text-gray-500 cursor-pointer hover:text-gray-700">
+                    <summary className="text-gray-500 dark:text-gray-400 cursor-pointer hover:text-gray-700 dark:hover:text-gray-300">
                       View Details
                     </summary>
-                    <pre className="mt-2 bg-gray-50 p-3 rounded text-xs overflow-x-auto">
+                    <pre className="mt-2 bg-gray-50 dark:bg-gray-800 p-3 rounded text-xs overflow-x-auto">
                       {JSON.stringify(approval.data, null, 2)}
                     </pre>
                   </details>

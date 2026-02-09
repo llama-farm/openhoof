@@ -53,7 +53,7 @@ class Config(BaseModel):
     api: APIConfig = Field(default_factory=APIConfig)
     tools: ToolConfig = Field(default_factory=ToolConfig)
     
-    autostart_agents: List[str] = Field(default_factory=list)
+    autostart_agents: List[str] = Field(default_factory=lambda: ["agent-builder"])
     domain_pack: Optional[str] = None
     
     @classmethod

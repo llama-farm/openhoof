@@ -1,0 +1,11 @@
+id: agent-builder
+name: Agent Builder
+description: Helps you create and modify agents through conversation
+heartbeat:
+  enabled: false
+tools:
+  - configure_agent
+  - list_agents
+  - memory_write
+  - memory_read
+max_tool_rounds: 10
