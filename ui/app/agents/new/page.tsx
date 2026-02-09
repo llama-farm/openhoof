@@ -43,15 +43,15 @@ export default function NewAgentPage() {
     <div className="max-w-2xl mx-auto">
       <h1 className="text-2xl font-bold mb-6">Create New Agent</h1>
 
-      <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow p-6 space-y-4">
+      <form onSubmit={handleSubmit} className="bg-white dark:bg-gray-900 rounded-lg shadow dark:shadow-gray-900/20 p-6 space-y-4">
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded p-3 text-red-700">
+          <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded p-3 text-red-700 dark:text-red-300">
             {error}
           </div>
         )}
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             Agent ID
           </label>
           <input
@@ -61,16 +61,16 @@ export default function NewAgentPage() {
               setFormData({ ...formData, agent_id: e.target.value.toLowerCase().replace(/\s/g, "-") })
             }
             placeholder="my-agent"
-            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             required
           />
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             Lowercase letters, numbers, and hyphens only
           </p>
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             Display Name
           </label>
           <input
@@ -78,13 +78,13 @@ export default function NewAgentPage() {
             value={formData.name}
             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
             placeholder="My Agent"
-            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             required
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             Description
           </label>
           <input
@@ -92,12 +92,12 @@ export default function NewAgentPage() {
             value={formData.description}
             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
             placeholder="A helpful AI agent"
-            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             SOUL.md (Optional)
           </label>
           <textarea
@@ -105,9 +105,9 @@ export default function NewAgentPage() {
             onChange={(e) => setFormData({ ...formData, soul: e.target.value })}
             placeholder="# My Agent&#10;&#10;You are a helpful AI agent...&#10;&#10;## Identity&#10;...&#10;&#10;## Behavior&#10;..."
             rows={10}
-            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+            className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
           />
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             Define the agent's identity and personality. Leave blank for default.
           </p>
         </div>
@@ -116,7 +116,7 @@ export default function NewAgentPage() {
           <button
             type="button"
             onClick={() => router.back()}
-            className="px-4 py-2 text-gray-600 hover:text-gray-800"
+            className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
           >
             Cancel
           </button>

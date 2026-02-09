@@ -145,15 +145,15 @@ export default function AgentDetailPage() {
             <span
               className={`px-2 py-1 rounded-full text-xs ${
                 agent.status === "running"
-                  ? "bg-green-100 text-green-800"
-                  : "bg-gray-100 text-gray-800"
+                  ? "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200"
+                  : "bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200"
               }`}
             >
               {agent.status}
             </span>
           </div>
-          <p className="text-gray-500">{agent.agent_id}</p>
-          {agent.description && <p className="text-gray-600 mt-1">{agent.description}</p>}
+          <p className="text-gray-500 dark:text-gray-400">{agent.agent_id}</p>
+          {agent.description && <p className="text-gray-600 dark:text-gray-400 mt-1">{agent.description}</p>}
         </div>
         <div className="flex space-x-2">
           {agent.status === "running" ? (
@@ -193,24 +193,24 @@ export default function AgentDetailPage() {
       </div>
 
       {/* Tools Management */}
-      <div className="bg-white rounded-lg shadow p-6">
+      <div className="bg-white dark:bg-gray-900 rounded-lg shadow dark:shadow-gray-900/20 p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-semibold">🔧 Tools</h2>
-          <span className="text-sm text-gray-500">
+          <span className="text-sm text-gray-500 dark:text-gray-400">
             {assignedTools.length} assigned
           </span>
         </div>
 
         {/* Assigned Tools */}
         <div className="mb-4">
-          <h3 className="text-sm font-medium text-gray-700 mb-2">Assigned</h3>
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Assigned</h3>
           <div className="flex flex-wrap gap-2">
             {assignedTools.map((tool) => (
               <button
                 key={tool.name}
                 onClick={() => toggleTool(tool.name, true)}
                 disabled={toolsLoading}
-                className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-full text-sm hover:bg-blue-100 border border-blue-200 transition-colors"
+                className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm hover:bg-blue-100 border border-blue-200 dark:border-blue-800 transition-colors"
                 title={tool.description}
               >
                 <span className="font-mono text-xs">{tool.name}</span>
@@ -218,7 +218,7 @@ export default function AgentDetailPage() {
               </button>
             ))}
             {assignedTools.length === 0 && (
-              <span className="text-gray-400 text-sm">All tools enabled (no filter)</span>
+              <span className="text-gray-400 dark:text-gray-500 text-sm">All tools enabled (no filter)</span>
             )}
           </div>
         </div>
@@ -226,14 +226,14 @@ export default function AgentDetailPage() {
         {/* Available (unassigned) Tools */}
         {availableTools.length > 0 && (
           <div>
-            <h3 className="text-sm font-medium text-gray-700 mb-2">Available</h3>
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Available</h3>
             <div className="flex flex-wrap gap-2">
               {availableTools.map((tool) => (
                 <button
                   key={tool.name}
                   onClick={() => toggleTool(tool.name, false)}
                   disabled={toolsLoading}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-50 text-gray-500 rounded-full text-sm hover:bg-green-50 hover:text-green-700 border border-gray-200 transition-colors"
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded-full text-sm hover:bg-green-50 hover:text-green-700 border border-gray-200 dark:border-gray-700 transition-colors"
                   title={tool.description}
                 >
                   <span className="text-green-400">+</span>
@@ -245,9 +245,9 @@ export default function AgentDetailPage() {
         )}
 
         {agent.model && (
-          <div className="mt-4 pt-4 border-t">
-            <span className="text-sm text-gray-500">Model: </span>
-            <span className="text-sm font-mono bg-gray-100 px-2 py-0.5 rounded">
+          <div className="mt-4 pt-4 border-t dark:border-gray-700">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Model: </span>
+            <span className="text-sm font-mono bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded">
               {agent.model}
             </span>
           </div>
@@ -257,7 +257,7 @@ export default function AgentDetailPage() {
       {/* Workspace Editor */}
       <div className="grid grid-cols-4 gap-4">
         {/* File List */}
-        <div className="bg-white rounded-lg shadow p-4">
+        <div className="bg-white dark:bg-gray-900 rounded-lg shadow dark:shadow-gray-900/20 p-4">
           <h3 className="font-semibold mb-3">Workspace Files</h3>
           <div className="space-y-1">
             {files.map((file) => (
@@ -267,7 +267,7 @@ export default function AgentDetailPage() {
                 className={`w-full text-left px-2 py-1 rounded text-sm ${
                   selectedFile === file
                     ? "bg-blue-100 text-blue-800"
-                    : "hover:bg-gray-100"
+                    : "hover:bg-gray-100 dark:hover:bg-gray-800"
                 }`}
               >
                 📄 {file}
@@ -277,7 +277,7 @@ export default function AgentDetailPage() {
         </div>
 
         {/* File Editor */}
-        <div className="col-span-3 bg-white rounded-lg shadow p-4">
+        <div className="col-span-3 bg-white dark:bg-gray-900 rounded-lg shadow dark:shadow-gray-900/20 p-4">
           {selectedFile ? (
             <>
               <div className="flex justify-between items-center mb-3">
@@ -293,11 +293,11 @@ export default function AgentDetailPage() {
               <textarea
                 value={fileContent}
                 onChange={(e) => setFileContent(e.target.value)}
-                className="w-full h-96 p-3 font-mono text-sm border rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full h-96 p-3 font-mono text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100"
               />
             </>
           ) : (
-            <div className="flex items-center justify-center h-96 text-gray-400">
+            <div className="flex items-center justify-center h-96 text-gray-400 dark:text-gray-500">
               Select a file to edit
             </div>
           )}

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import shutil
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Any
@@ -27,13 +28,159 @@ from ..tools import ToolRegistry, ToolContext
 from ..tools.builtin import register_builtin_tools
 from ..tools.builtin.spawn import SpawnAgentTool
 from .heartbeat import HeartbeatRunner, HeartbeatConfig
+from .autonomy_loop import AutonomyLoop
 from .subagents import SubagentRegistry
+from ..core.hot_state import HotState, HotStateFieldConfig as HSFieldConfig
+from ..core.sensors import Sensor, sensor_factory
 
 logger = logging.getLogger(__name__)
 
 # Max messages before auto-compaction
 MAX_CONTEXT_MESSAGES = 30
 COMPACT_KEEP_LAST = 10
+
+
+@dataclass
+class ActiveHoursConfig:
+    """Configuration for active hours."""
+    start: str = "08:00"  # HH:MM
+    end: str = "23:00"    # HH:MM
+
+
+@dataclass
+class AutonomyConfig:
+    """Configuration for autonomous agent loop."""
+    enabled: bool = False
+    max_consecutive_turns: int = 50
+    token_budget_per_hour: int = 100000
+    max_actions_per_minute: int = 10
+    idle_timeout: int = 600  # seconds
+    active_hours: Optional[ActiveHoursConfig] = None
+    precheck_model: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "AutonomyConfig":
+        """Parse from a dict (YAML section)."""
+        active_hours = None
+        if "active_hours" in data:
+            ah = data["active_hours"]
+            active_hours = ActiveHoursConfig(
+                start=ah.get("start", "08:00"),
+                end=ah.get("end", "23:00"),
+            )
+        return cls(
+            enabled=data.get("enabled", False),
+            max_consecutive_turns=data.get("max_consecutive_turns", 50),
+            token_budget_per_hour=data.get("token_budget_per_hour", 100000),
+            max_actions_per_minute=data.get("max_actions_per_minute", 10),
+            idle_timeout=data.get("idle_timeout", 600),
+            active_hours=active_hours,
+            precheck_model=data.get("precheck_model"),
+        )
+
+
+@dataclass
+class HotStateFieldConfig:
+    """Configuration for a single hot state field."""
+    type: str = "object"  # "object", "number", "string", "array", "boolean"
+    ttl: Optional[int] = None  # seconds, None means never stale
+    refresh_tool: Optional[str] = None
+    max_items: Optional[int] = None  # for array types only
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "HotStateFieldConfig":
+        """Parse from a dict."""
+        return cls(
+            type=data.get("type", "object"),
+            ttl=data.get("ttl"),
+            refresh_tool=data.get("refresh_tool"),
+            max_items=data.get("max_items"),
+        )
+
+
+@dataclass
+class HotStateConfig:
+    """Configuration for agent hot state."""
+    fields: Dict[str, HotStateFieldConfig] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "HotStateConfig":
+        """Parse from a dict (YAML section)."""
+        fields = {}
+        for name, field_data in data.get("fields", {}).items():
+            fields[name] = HotStateFieldConfig.from_dict(field_data)
+        return cls(fields=fields)
+
+
+@dataclass
+class SensorSignalConfig:
+    """Configuration for an ML signal on a sensor."""
+    name: str
+    model: str
+    prompt: str
+    threshold: float = 0.8
+    notify: bool = True
+    cooldown: Optional[int] = None  # seconds
+
+
+@dataclass
+class SensorSourceConfig:
+    """Configuration for a sensor data source."""
+    tool: Optional[str] = None
+    params: Dict[str, Any] = field(default_factory=dict)
+    url: Optional[str] = None
+    path: Optional[str] = None
+
+
+@dataclass
+class SensorUpdateConfig:
+    """Configuration for a sensor hot state update mapping."""
+    field: str
+
+
+@dataclass
+class SensorConfig:
+    """Configuration for a sensor."""
+    name: str
+    type: str  # "poll", "watch", "stream"
+    interval: Optional[int] = None  # seconds, for poll type
+    source: SensorSourceConfig = field(default_factory=SensorSourceConfig)
+    updates: List[SensorUpdateConfig] = field(default_factory=list)
+    signals: List[SensorSignalConfig] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SensorConfig":
+        """Parse from a dict (YAML list item)."""
+        source_data = data.get("source", {})
+        source = SensorSourceConfig(
+            tool=source_data.get("tool"),
+            params=source_data.get("params", {}),
+            url=source_data.get("url"),
+            path=source_data.get("path"),
+        )
+        updates = [
+            SensorUpdateConfig(field=u["field"])
+            for u in data.get("updates", [])
+        ]
+        signals = [
+            SensorSignalConfig(
+                name=s["name"],
+                model=s["model"],
+                prompt=s["prompt"],
+                threshold=s.get("threshold", 0.8),
+                notify=s.get("notify", True),
+                cooldown=s.get("cooldown"),
+            )
+            for s in data.get("signals", [])
+        ]
+        return cls(
+            name=data["name"],
+            type=data["type"],
+            interval=data.get("interval"),
+            source=source,
+            updates=updates,
+            signals=signals,
+        )
 
 
 @dataclass
@@ -48,12 +195,34 @@ class AgentConfig:
     heartbeat_interval: int = 1800
     tools: List[str] = field(default_factory=list)  # List of allowed tool names
     max_tool_rounds: int = 5  # Max consecutive tool-call rounds before forcing a response
+    autonomy: Optional[AutonomyConfig] = None
+    hot_state: Optional[HotStateConfig] = None
+    sensors: List[SensorConfig] = field(default_factory=list)
 
     @classmethod
     def from_yaml(cls, path: Path) -> "AgentConfig":
         """Load config from YAML file."""
         with open(path) as f:
             data = yaml.safe_load(f) or {}
+
+        # Parse autonomy config
+        autonomy = None
+        if "autonomy" in data:
+            autonomy = AutonomyConfig.from_dict(data["autonomy"])
+
+        # Parse hot state config
+        hot_state = None
+        if "hot_state" in data:
+            hot_state = HotStateConfig.from_dict(data["hot_state"])
+
+        # Parse sensor configs
+        sensors = []
+        for sensor_data in data.get("sensors", []):
+            try:
+                sensors.append(SensorConfig.from_dict(sensor_data))
+            except (KeyError, TypeError) as e:
+                logger.error(f"Invalid sensor config: {e}")
+
         return cls(
             agent_id=data.get("id", path.parent.name),
             name=data.get("name", path.parent.name),
@@ -64,6 +233,9 @@ class AgentConfig:
             heartbeat_interval=data.get("heartbeat", {}).get("interval", 1800),
             tools=data.get("tools", []),
             max_tool_rounds=data.get("max_tool_rounds", 5),
+            autonomy=autonomy,
+            hot_state=hot_state,
+            sensors=sensors,
         )
 
 
@@ -75,6 +247,9 @@ class AgentHandle:
     workspace: AgentWorkspace
     session: SessionEntry
     heartbeat: Optional[HeartbeatRunner] = None
+    autonomy_loop: Optional[AutonomyLoop] = None
+    hot_state: Optional[HotState] = None
+    sensors: List[Sensor] = field(default_factory=list)
     status: str = "running"
 
 
@@ -99,7 +274,7 @@ class AgentManager:
         # Tool registry
         self.tool_registry = tool_registry or ToolRegistry()
         if not tool_registry:
-            register_builtin_tools(self.tool_registry)
+            register_builtin_tools(self.tool_registry, agent_manager=self)
 
         # Wire up spawn tool callback
         spawn_tool = self.tool_registry.get("spawn_agent")
@@ -113,8 +288,25 @@ class AgentManager:
             default_timeout_seconds=300,
         )
 
+        # Provision default agents (e.g., agent-builder) if not already present
+        self._provision_defaults()
+
         # Running agents
         self._agents: Dict[str, AgentHandle] = {}
+
+    def _provision_defaults(self) -> None:
+        """Provision default agent workspaces if they don't exist."""
+        defaults_dir = Path(__file__).parent / "defaults"
+        if not defaults_dir.exists():
+            return
+
+        for default_agent_dir in defaults_dir.iterdir():
+            if not default_agent_dir.is_dir():
+                continue
+            target = self.agents_dir / default_agent_dir.name
+            if not target.exists():
+                shutil.copytree(default_agent_dir, target)
+                logger.info(f"Provisioned default agent: {default_agent_dir.name}")
 
     async def _handle_spawn_request(
         self,
@@ -309,6 +501,50 @@ Be thorough, use your tools, and report back clearly."""
             )
             heartbeat.start()
 
+        # Setup autonomy (hot state, sensors, loop)
+        hot_state_obj = None
+        sensors_list: List[Sensor] = []
+        autonomy_loop = None
+
+        if config.autonomy and config.autonomy.enabled:
+            # Create hot state
+            if config.hot_state:
+                field_configs = {
+                    name: HSFieldConfig(
+                        type=fc.type,
+                        ttl=fc.ttl,
+                        refresh_tool=fc.refresh_tool,
+                        max_items=fc.max_items,
+                    )
+                    for name, fc in config.hot_state.fields.items()
+                }
+                hot_state_obj = HotState(field_configs)
+            else:
+                hot_state_obj = HotState({})
+
+            # Create sensors
+            for sensor_cfg in config.sensors:
+                sensor = sensor_factory(
+                    config=sensor_cfg,
+                    agent_id=agent_id,
+                    hot_state=hot_state_obj,
+                    tool_registry=self.tool_registry,
+                    inference=self.inference,
+                )
+                if sensor:
+                    sensors_list.append(sensor)
+
+            # Create autonomy loop
+            autonomy_loop = AutonomyLoop(
+                agent_id=agent_id,
+                run_agent_turn=self._run_agent_turn,
+                hot_state=hot_state_obj,
+                sensors=sensors_list,
+                tool_registry=self.tool_registry,
+                inference=self.inference,
+                config=config.autonomy,
+            )
+
         # Create handle
         handle = AgentHandle(
             agent_id=agent_id,
@@ -316,10 +552,18 @@ Be thorough, use your tools, and report back clearly."""
             workspace=workspace,
             session=session,
             heartbeat=heartbeat,
+            autonomy_loop=autonomy_loop,
+            hot_state=hot_state_obj,
+            sensors=sensors_list,
             status="running"
         )
 
         self._agents[agent_id] = handle
+
+        # Start autonomy loop after handle is registered
+        if autonomy_loop:
+            autonomy_loop.start()
+            logger.info(f"Autonomy loop started for agent: {agent_id}")
 
         # Emit event
         await event_bus.emit(EVENT_AGENT_STARTED, {
@@ -327,6 +571,7 @@ Be thorough, use your tools, and report back clearly."""
             "name": config.name,
             "session_key": session_key,
             "tools": config.tools or [t.name for t in self.tool_registry.list_tools()],
+            "autonomy_enabled": config.autonomy.enabled if config.autonomy else False,
         })
 
         logger.info(f"Started agent: {agent_id}")
@@ -337,6 +582,10 @@ Be thorough, use your tools, and report back clearly."""
         handle = self._agents.get(agent_id)
         if not handle:
             return False
+
+        # Stop autonomy loop (which also stops sensors)
+        if handle.autonomy_loop:
+            handle.autonomy_loop.stop()
 
         # Stop heartbeat
         if handle.heartbeat:

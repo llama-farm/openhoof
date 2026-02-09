@@ -112,82 +112,82 @@ export default function TrainingPage() {
         <h1 className="text-2xl font-bold flex items-center gap-2">
           🧠 Tool Router Training
         </h1>
-        <p className="text-gray-500 mt-1">
+        <p className="text-gray-500 dark:text-gray-400 mt-1">
           LoRA fine-tuning pipeline for FunctionGemma-270M — routes user messages to the right tool in &lt;300ms
         </p>
       </div>
 
       {/* Hero Results */}
-      <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl p-6">
+      <div className="bg-gradient-to-r from-green-50 dark:from-green-950 to-emerald-50 dark:to-emerald-950 border border-green-200 dark:border-green-800 rounded-xl p-6">
         <div className="flex items-center gap-3 mb-4">
           <span className="text-4xl">🎯</span>
           <div>
-            <h2 className="text-xl font-bold text-green-800">100% Accuracy Achieved</h2>
-            <p className="text-green-600 text-sm">FunctionGemma-270M fine-tuned on 226 examples • 3 min training • 271ms avg latency</p>
+            <h2 className="text-xl font-bold text-green-800 dark:text-green-200">100% Accuracy Achieved</h2>
+            <p className="text-green-600 dark:text-green-400 text-sm">FunctionGemma-270M fine-tuned on 226 examples • 3 min training • 271ms avg latency</p>
           </div>
         </div>
 
         <div className="grid grid-cols-3 gap-4 mt-4">
           {Object.entries(data.experiment_results).map(([name, result]) => (
-            <div key={name} className="bg-white/80 rounded-lg p-4 text-center">
+            <div key={name} className="bg-white/80 dark:bg-gray-800/80 rounded-lg p-4 text-center">
               <div className={`text-3xl font-bold ${result.accuracy === 100 ? 'text-green-600' : result.accuracy > 30 ? 'text-yellow-600' : 'text-red-500'}`}>
                 {result.accuracy.toFixed(1)}%
               </div>
-              <div className="text-sm font-medium text-gray-700 mt-1">{name}</div>
-              <div className="text-xs text-gray-500">{result.avg_latency_ms.toFixed(0)}ms avg</div>
+              <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mt-1">{name}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{result.avg_latency_ms.toFixed(0)}ms avg</div>
             </div>
           ))}
         </div>
       </div>
 
       {/* Architecture Diagram */}
-      <div className="bg-white rounded-xl shadow border p-6">
+      <div className="bg-white dark:bg-gray-900 rounded-xl shadow dark:shadow-gray-900/20 border dark:border-gray-700 p-6">
         <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
           ⚡ Two-Stage Pipeline Architecture
         </h2>
         <div className="flex items-center justify-center gap-2 py-6">
           {/* User Input */}
-          <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 text-center min-w-[160px]">
+          <div className="bg-blue-50 dark:bg-blue-950 border-2 border-blue-200 dark:border-blue-800 rounded-lg p-4 text-center min-w-[160px]">
             <div className="text-2xl mb-1">💬</div>
-            <div className="font-semibold text-blue-800">User Message</div>
-            <div className="text-xs text-blue-500 mt-1">"Save a note about<br/>the meeting"</div>
+            <div className="font-semibold text-blue-800 dark:text-blue-200">User Message</div>
+            <div className="text-xs text-blue-500 dark:text-blue-400 mt-1">"Save a note about<br/>the meeting"</div>
           </div>
 
-          <div className="text-gray-400 text-2xl">→</div>
+          <div className="text-gray-400 dark:text-gray-500 text-2xl">→</div>
 
           {/* Stage 1: Router */}
-          <div className="bg-amber-50 border-2 border-amber-300 rounded-lg p-4 text-center min-w-[180px] relative">
+          <div className="bg-amber-50 dark:bg-amber-950 border-2 border-amber-300 dark:border-amber-800 rounded-lg p-4 text-center min-w-[180px] relative">
             <div className="absolute -top-3 left-3 bg-amber-200 text-amber-800 text-xs font-bold px-2 py-0.5 rounded-full">Stage 1</div>
             <div className="text-2xl mb-1">🧠</div>
-            <div className="font-semibold text-amber-800">FunctionGemma</div>
-            <div className="text-xs text-amber-600 mt-1">270M params • 271ms</div>
-            <div className="text-xs text-amber-500">550MB RAM • Runs on phone</div>
+            <div className="font-semibold text-amber-800 dark:text-amber-200">FunctionGemma</div>
+            <div className="text-xs text-amber-600 dark:text-amber-400 mt-1">270M params • 271ms</div>
+            <div className="text-xs text-amber-500 dark:text-amber-400">550MB RAM • Runs on phone</div>
           </div>
 
-          <div className="text-gray-400 text-2xl">→</div>
+          <div className="text-gray-400 dark:text-gray-500 text-2xl">→</div>
 
           {/* Tool Selection */}
-          <div className="bg-green-50 border-2 border-green-300 rounded-lg p-4 text-center min-w-[160px]">
+          <div className="bg-green-50 dark:bg-green-950 border-2 border-green-300 dark:border-green-800 rounded-lg p-4 text-center min-w-[160px]">
             <div className="text-2xl mb-1">🔧</div>
-            <div className="font-semibold text-green-800">Tool Selected</div>
-            <div className="text-xs text-green-600 mt-1 font-mono">memory_write</div>
-            <div className="text-xs text-green-500">Execute locally</div>
+            <div className="font-semibold text-green-800 dark:text-green-200">Tool Selected</div>
+            <div className="text-xs text-green-600 dark:text-green-400 mt-1 font-mono">memory_write</div>
+            <div className="text-xs text-green-500 dark:text-green-400">Execute locally</div>
           </div>
 
-          <div className="text-gray-400 text-2xl">→</div>
+          <div className="text-gray-400 dark:text-gray-500 text-2xl">→</div>
 
           {/* Stage 2: Reasoning */}
-          <div className="bg-purple-50 border-2 border-purple-300 rounded-lg p-4 text-center min-w-[180px] relative">
+          <div className="bg-purple-50 dark:bg-purple-950 border-2 border-purple-300 dark:border-purple-800 rounded-lg p-4 text-center min-w-[180px] relative">
             <div className="absolute -top-3 left-3 bg-purple-200 text-purple-800 text-xs font-bold px-2 py-0.5 rounded-full">Stage 2</div>
             <div className="text-2xl mb-1">🦙</div>
-            <div className="font-semibold text-purple-800">Qwen3-8B</div>
-            <div className="text-xs text-purple-600 mt-1">Reasoning + Response</div>
-            <div className="text-xs text-purple-500">Only when needed</div>
+            <div className="font-semibold text-purple-800 dark:text-purple-200">Qwen3-8B</div>
+            <div className="text-xs text-purple-600 dark:text-purple-400 mt-1">Reasoning + Response</div>
+            <div className="text-xs text-purple-500 dark:text-purple-400">Only when needed</div>
           </div>
         </div>
 
-        <div className="bg-gray-50 rounded-lg p-4 mt-2">
-          <div className="text-sm text-gray-600 text-center">
+        <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 mt-2">
+          <div className="text-sm text-gray-600 dark:text-gray-400 text-center">
             <strong>Key insight:</strong> The tiny 270M model handles tool routing (the fast, repetitive part).
             The big 8B model only runs for complex reasoning. On a phone, Stage 1 runs at <strong>&lt;100ms</strong> — fully offline.
           </div>
@@ -197,35 +197,35 @@ export default function TrainingPage() {
       {/* Training Data & Tool Distribution */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Training Data Sources */}
-        <div className="bg-white rounded-xl shadow border p-6">
+        <div className="bg-white dark:bg-gray-900 rounded-xl shadow dark:shadow-gray-900/20 border dark:border-gray-700 p-6">
           <h2 className="text-lg font-semibold mb-4">📊 Training Data</h2>
 
           <div className="flex items-center gap-4 mb-6">
             <div className="text-center">
               <div className="text-4xl font-bold text-blue-600">{data.total_examples}</div>
-              <div className="text-sm text-gray-500">Total Examples</div>
+              <div className="text-sm text-gray-500 dark:text-gray-400">Total Examples</div>
             </div>
             <div className="flex-1 space-y-2">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-blue-500 rounded"></div>
-                <span className="text-sm text-gray-600">Hand-curated</span>
-                <span className="text-sm font-mono text-gray-800 ml-auto">{data.curated}</span>
+                <span className="text-sm text-gray-600 dark:text-gray-400">Hand-curated</span>
+                <span className="text-sm font-mono text-gray-800 dark:text-gray-200 ml-auto">{data.curated}</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-purple-500 rounded"></div>
-                <span className="text-sm text-gray-600">Teacher-generated (Qwen3-8B)</span>
-                <span className="text-sm font-mono text-gray-800 ml-auto">{data.synthetic}</span>
+                <span className="text-sm text-gray-600 dark:text-gray-400">Teacher-generated (Qwen3-8B)</span>
+                <span className="text-sm font-mono text-gray-800 dark:text-gray-200 ml-auto">{data.synthetic}</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-green-500 rounded"></div>
-                <span className="text-sm text-gray-600">Live usage (continuous)</span>
-                <span className="text-sm font-mono text-gray-800 ml-auto">{data.live}</span>
+                <span className="text-sm text-gray-600 dark:text-gray-400">Live usage (continuous)</span>
+                <span className="text-sm font-mono text-gray-800 dark:text-gray-200 ml-auto">{data.live}</span>
               </div>
             </div>
           </div>
 
           {/* Stacked bar */}
-          <div className="w-full h-6 bg-gray-100 rounded-full overflow-hidden flex">
+          <div className="w-full h-6 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden flex">
             <div className="bg-blue-500 h-full" style={{ width: `${(data.curated / data.total_examples) * 100}%` }}></div>
             <div className="bg-purple-500 h-full" style={{ width: `${(data.synthetic / data.total_examples) * 100}%` }}></div>
             <div className="bg-green-500 h-full" style={{ width: `${(data.live / data.total_examples) * 100}%` }}></div>
@@ -233,7 +233,7 @@ export default function TrainingPage() {
         </div>
 
         {/* Tool Distribution */}
-        <div className="bg-white rounded-xl shadow border p-6">
+        <div className="bg-white dark:bg-gray-900 rounded-xl shadow dark:shadow-gray-900/20 border dark:border-gray-700 p-6">
           <h2 className="text-lg font-semibold mb-4">🔧 Examples by Tool</h2>
           <div className="space-y-2">
             {Object.entries(data.by_tool)
@@ -241,14 +241,14 @@ export default function TrainingPage() {
               .map(([tool, count]) => (
                 <div key={tool} className="flex items-center gap-2">
                   <span className="text-lg w-7">{toolEmoji[tool] || "🔧"}</span>
-                  <span className="text-sm font-mono w-28 text-gray-700">{tool}</span>
-                  <div className="flex-1 h-5 bg-gray-100 rounded-full overflow-hidden">
+                  <span className="text-sm font-mono w-28 text-gray-700 dark:text-gray-300">{tool}</span>
+                  <div className="flex-1 h-5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
                     <div
                       className={`h-full rounded-full ${toolColors[tool] || "bg-gray-400"}`}
                       style={{ width: `${(count / maxToolCount) * 100}%` }}
                     ></div>
                   </div>
-                  <span className="text-sm font-mono text-gray-500 w-8 text-right">{count}</span>
+                  <span className="text-sm font-mono text-gray-500 dark:text-gray-400 w-8 text-right">{count}</span>
                 </div>
               ))}
           </div>
@@ -257,35 +257,35 @@ export default function TrainingPage() {
 
       {/* Training Progress */}
       {data.latest_run && (
-        <div className="bg-white rounded-xl shadow border p-6">
+        <div className="bg-white dark:bg-gray-900 rounded-xl shadow dark:shadow-gray-900/20 border dark:border-gray-700 p-6">
           <h2 className="text-lg font-semibold mb-4">📈 Training Progress</h2>
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-            <div className="bg-gray-50 rounded-lg p-4 text-center">
+            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-center">
               <div className="text-2xl font-bold text-green-600">{data.latest_run.final_loss.toFixed(3)}</div>
-              <div className="text-xs text-gray-500">Final Val Loss</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Final Val Loss</div>
             </div>
-            <div className="bg-gray-50 rounded-lg p-4 text-center">
+            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-center">
               <div className="text-2xl font-bold text-blue-600">{data.latest_run.training_examples}</div>
-              <div className="text-xs text-gray-500">Training Examples</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Training Examples</div>
             </div>
-            <div className="bg-gray-50 rounded-lg p-4 text-center">
+            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-center">
               <div className="text-2xl font-bold text-purple-600">{data.latest_run.epochs}</div>
-              <div className="text-xs text-gray-500">Epochs</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Epochs</div>
             </div>
-            <div className="bg-gray-50 rounded-lg p-4 text-center">
+            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-center">
               <div className="text-2xl font-bold text-amber-600">{data.latest_run.backend.toUpperCase()}</div>
-              <div className="text-xs text-gray-500">Backend</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Backend</div>
             </div>
-            <div className="bg-gray-50 rounded-lg p-4 text-center">
-              <div className="text-2xl font-bold text-gray-600">178×</div>
-              <div className="text-xs text-gray-500">Loss Improvement</div>
+            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-center">
+              <div className="text-2xl font-bold text-gray-600 dark:text-gray-400">178×</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Loss Improvement</div>
             </div>
           </div>
 
           {/* Loss curve visualization */}
           <div className="mt-6">
-            <h3 className="text-sm font-medium text-gray-600 mb-2">Loss Curve (339 iterations)</h3>
-            <div className="relative h-32 bg-gray-50 rounded-lg border overflow-hidden">
+            <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">Loss Curve (339 iterations)</h3>
+            <div className="relative h-32 bg-gray-50 dark:bg-gray-800 rounded-lg border dark:border-gray-700 overflow-hidden">
               {/* SVG loss curve */}
               <svg viewBox="0 0 339 100" className="w-full h-full" preserveAspectRatio="none">
                 <defs>
@@ -317,56 +317,56 @@ export default function TrainingPage() {
       )}
 
       {/* Continuous Training Loop */}
-      <div className="bg-white rounded-xl shadow border p-6">
+      <div className="bg-white dark:bg-gray-900 rounded-xl shadow dark:shadow-gray-900/20 border dark:border-gray-700 p-6">
         <h2 className="text-lg font-semibold mb-4">🔄 Continuous Training Loop</h2>
         <div className="flex items-center justify-center gap-2 py-4">
           <div className="flex flex-col items-center gap-1">
-            <div className="w-20 h-20 bg-blue-50 border-2 border-blue-300 rounded-full flex items-center justify-center text-2xl">💬</div>
-            <span className="text-xs font-medium text-gray-600">User chats</span>
+            <div className="w-20 h-20 bg-blue-50 dark:bg-blue-950 border-2 border-blue-300 dark:border-blue-700 rounded-full flex items-center justify-center text-2xl">💬</div>
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">User chats</span>
           </div>
-          <div className="text-gray-300 text-xl">→</div>
+          <div className="text-gray-300 dark:text-gray-600 text-xl">→</div>
           <div className="flex flex-col items-center gap-1">
-            <div className="w-20 h-20 bg-amber-50 border-2 border-amber-300 rounded-full flex items-center justify-center text-2xl">🧠</div>
-            <span className="text-xs font-medium text-gray-600">Router decides</span>
+            <div className="w-20 h-20 bg-amber-50 dark:bg-amber-950 border-2 border-amber-300 dark:border-amber-700 rounded-full flex items-center justify-center text-2xl">🧠</div>
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Router decides</span>
           </div>
-          <div className="text-gray-300 text-xl">→</div>
+          <div className="text-gray-300 dark:text-gray-600 text-xl">→</div>
           <div className="flex flex-col items-center gap-1">
-            <div className="w-20 h-20 bg-green-50 border-2 border-green-300 rounded-full flex items-center justify-center text-2xl">🔧</div>
-            <span className="text-xs font-medium text-gray-600">Tool executes</span>
+            <div className="w-20 h-20 bg-green-50 dark:bg-green-950 border-2 border-green-300 dark:border-green-700 rounded-full flex items-center justify-center text-2xl">🔧</div>
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Tool executes</span>
           </div>
-          <div className="text-gray-300 text-xl">→</div>
+          <div className="text-gray-300 dark:text-gray-600 text-xl">→</div>
           <div className="flex flex-col items-center gap-1">
-            <div className="w-20 h-20 bg-purple-50 border-2 border-purple-300 rounded-full flex items-center justify-center text-2xl">📊</div>
-            <span className="text-xs font-medium text-gray-600">Log outcome</span>
+            <div className="w-20 h-20 bg-purple-50 dark:bg-purple-950 border-2 border-purple-300 dark:border-purple-700 rounded-full flex items-center justify-center text-2xl">📊</div>
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Log outcome</span>
           </div>
-          <div className="text-gray-300 text-xl">→</div>
+          <div className="text-gray-300 dark:text-gray-600 text-xl">→</div>
           <div className="flex flex-col items-center gap-1">
-            <div className="w-20 h-20 bg-red-50 border-2 border-red-300 rounded-full flex items-center justify-center text-2xl">🔁</div>
-            <span className="text-xs font-medium text-gray-600">Retrain</span>
+            <div className="w-20 h-20 bg-red-50 dark:bg-red-950 border-2 border-red-300 dark:border-red-700 rounded-full flex items-center justify-center text-2xl">🔁</div>
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Retrain</span>
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-          <div className="bg-blue-50 rounded-lg p-4">
-            <h3 className="font-semibold text-blue-800 text-sm mb-2">1. Data Collection</h3>
-            <p className="text-xs text-blue-600">Every tool routing decision is automatically logged with the user message, selected tool, and outcome. No manual labeling needed.</p>
-            <code className="text-xs text-blue-500 block mt-2 bg-blue-100 p-2 rounded font-mono">~/.openhoof/data/function_pipeline/training_data.jsonl</code>
+          <div className="bg-blue-50 dark:bg-blue-950 rounded-lg p-4">
+            <h3 className="font-semibold text-blue-800 dark:text-blue-200 text-sm mb-2">1. Data Collection</h3>
+            <p className="text-xs text-blue-600 dark:text-blue-400">Every tool routing decision is automatically logged with the user message, selected tool, and outcome. No manual labeling needed.</p>
+            <code className="text-xs text-blue-500 dark:text-blue-400 block mt-2 bg-blue-100 dark:bg-blue-900 p-2 rounded font-mono">~/.openhoof/data/function_pipeline/training_data.jsonl</code>
           </div>
-          <div className="bg-purple-50 rounded-lg p-4">
-            <h3 className="font-semibold text-purple-800 text-sm mb-2">2. Teacher Generation</h3>
-            <p className="text-xs text-purple-600">Qwen3-8B generates diverse synthetic examples for underrepresented tools. Ensures balanced training data across all capabilities.</p>
-            <code className="text-xs text-purple-500 block mt-2 bg-purple-100 p-2 rounded font-mono">python training/pipeline.py generate</code>
+          <div className="bg-purple-50 dark:bg-purple-950 rounded-lg p-4">
+            <h3 className="font-semibold text-purple-800 dark:text-purple-200 text-sm mb-2">2. Teacher Generation</h3>
+            <p className="text-xs text-purple-600 dark:text-purple-400">Qwen3-8B generates diverse synthetic examples for underrepresented tools. Ensures balanced training data across all capabilities.</p>
+            <code className="text-xs text-purple-500 dark:text-purple-400 block mt-2 bg-purple-100 dark:bg-purple-900 p-2 rounded font-mono">python training/pipeline.py generate</code>
           </div>
-          <div className="bg-green-50 rounded-lg p-4">
-            <h3 className="font-semibold text-green-800 text-sm mb-2">3. Auto-Retrain</h3>
-            <p className="text-xs text-green-600">When enough new data accumulates, trigger LoRA fine-tuning. Same script runs on Mac (MLX) or Linux (CUDA). Hot-swap the model.</p>
-            <code className="text-xs text-green-500 block mt-2 bg-green-100 p-2 rounded font-mono">python training/pipeline.py run</code>
+          <div className="bg-green-50 dark:bg-green-950 rounded-lg p-4">
+            <h3 className="font-semibold text-green-800 dark:text-green-200 text-sm mb-2">3. Auto-Retrain</h3>
+            <p className="text-xs text-green-600 dark:text-green-400">When enough new data accumulates, trigger LoRA fine-tuning. Same script runs on Mac (MLX) or Linux (CUDA). Hot-swap the model.</p>
+            <code className="text-xs text-green-500 dark:text-green-400 block mt-2 bg-green-100 dark:bg-green-900 p-2 rounded font-mono">python training/pipeline.py run</code>
           </div>
         </div>
       </div>
 
       {/* Available Tools Reference */}
-      <div className="bg-white rounded-xl shadow border p-6">
+      <div className="bg-white dark:bg-gray-900 rounded-xl shadow dark:shadow-gray-900/20 border dark:border-gray-700 p-6">
         <h2 className="text-lg font-semibold mb-4">📦 Tool Definitions (what the router learns)</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {[
@@ -381,13 +381,13 @@ export default function TrainingPage() {
             { name: "exec", emoji: "⚡", sig: "command, timeout", desc: "Execute a shell command" },
             { name: "list_tools", emoji: "📦", sig: "(none)", desc: "List all available tools" },
           ].map((tool) => (
-            <div key={tool.name} className="flex items-start gap-3 bg-gray-50 rounded-lg p-3 border">
+            <div key={tool.name} className="flex items-start gap-3 bg-gray-50 dark:bg-gray-800 rounded-lg p-3 border dark:border-gray-700">
               <span className="text-xl">{tool.emoji}</span>
               <div className="min-w-0">
-                <div className="font-mono text-sm font-semibold text-gray-800">
-                  {tool.name}<span className="text-gray-400 font-normal">({tool.sig})</span>
+                <div className="font-mono text-sm font-semibold text-gray-800 dark:text-gray-200">
+                  {tool.name}<span className="text-gray-400 dark:text-gray-500 font-normal">({tool.sig})</span>
                 </div>
-                <div className="text-xs text-gray-500">{tool.desc}</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">{tool.desc}</div>
               </div>
             </div>
           ))}

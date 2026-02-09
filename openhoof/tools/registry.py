@@ -36,11 +36,22 @@ class ToolRegistry:
         """List all registered tools."""
         return list(self._tools.values())
     
-    def get_openai_schemas(self, tool_names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-        """Get OpenAI tool schemas for specified tools (or all if not specified)."""
+    def get_openai_schemas(
+        self,
+        tool_names: Optional[List[str]] = None,
+        include_autonomous: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Get OpenAI tool schemas for specified tools (or all if not specified).
+
+        Args:
+            tool_names: If specified, only include these tools.
+            include_autonomous: If False, excludes tools with autonomous_only=True.
+        """
         tools = self._tools.values()
         if tool_names:
             tools = [t for t in tools if t.name in tool_names]
+        if not include_autonomous:
+            tools = [t for t in tools if not getattr(t, "autonomous_only", False)]
         return [t.to_openai_schema() for t in tools]
     
     async def execute(

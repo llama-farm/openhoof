@@ -50,7 +50,7 @@ export default function ToolsPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-gray-100"></div>
       </div>
     );
   }
@@ -59,12 +59,12 @@ export default function ToolsPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold">🔧 Tools Registry</h1>
-        <div className="text-sm text-gray-500">
+        <div className="text-sm text-gray-500 dark:text-gray-400">
           {tools.length} tools available
         </div>
       </div>
 
-      <p className="text-gray-600">
+      <p className="text-gray-600 dark:text-gray-400">
         Tools are capabilities that agents can use. Assign tools to agents to
         control what they can do.
       </p>
@@ -77,7 +77,7 @@ export default function ToolsPage() {
           return (
             <div
               key={tool.name}
-              className="bg-white rounded-lg shadow border hover:border-blue-200 transition-colors"
+              className="bg-white dark:bg-gray-900 rounded-lg shadow dark:shadow-gray-900/20 border dark:border-gray-700 hover:border-blue-200 dark:hover:border-blue-700 transition-colors"
             >
               <div
                 className="p-4 cursor-pointer"
@@ -94,19 +94,19 @@ export default function ToolsPage() {
                       <h3 className="font-semibold text-lg font-mono">
                         {tool.name}
                       </h3>
-                      <p className="text-gray-500 text-sm">
+                      <p className="text-gray-500 dark:text-gray-400 text-sm">
                         {tool.description.split("\n")[0]}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-xs bg-gray-100 px-2 py-1 rounded">
+                    <span className="text-xs bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
                       {tool.parameter_names.length} params
                     </span>
                     <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded">
                       {usedBy.length} agents
                     </span>
-                    <span className="text-gray-400">
+                    <span className="text-gray-400 dark:text-gray-500">
                       {isExpanded ? "▲" : "▼"}
                     </span>
                   </div>
@@ -114,22 +114,22 @@ export default function ToolsPage() {
               </div>
 
               {isExpanded && (
-                <div className="border-t px-4 py-3 bg-gray-50">
+                <div className="border-t dark:border-gray-700 px-4 py-3 bg-gray-50 dark:bg-gray-800">
                   <div className="grid md:grid-cols-2 gap-4">
                     <div>
-                      <h4 className="font-medium text-sm text-gray-700 mb-2">
+                      <h4 className="font-medium text-sm text-gray-700 dark:text-gray-300 mb-2">
                         Description
                       </h4>
-                      <p className="text-sm text-gray-600 whitespace-pre-line">
+                      <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-line">
                         {tool.description}
                       </p>
                     </div>
                     <div>
-                      <h4 className="font-medium text-sm text-gray-700 mb-2">
+                      <h4 className="font-medium text-sm text-gray-700 dark:text-gray-300 mb-2">
                         Parameters
                       </h4>
                       {tool.parameter_names.length === 0 ? (
-                        <p className="text-sm text-gray-400">No parameters</p>
+                        <p className="text-sm text-gray-400 dark:text-gray-500">No parameters</p>
                       ) : (
                         <ul className="space-y-1">
                           {tool.parameter_names.map((param) => (
@@ -137,7 +137,7 @@ export default function ToolsPage() {
                               key={param}
                               className="text-sm flex items-center gap-2"
                             >
-                              <code className="bg-gray-200 px-1 rounded text-xs">
+                              <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded text-xs">
                                 {param}
                               </code>
                               {tool.required_params.includes(param) && (
@@ -150,7 +150,7 @@ export default function ToolsPage() {
                         </ul>
                       )}
 
-                      <h4 className="font-medium text-sm text-gray-700 mt-4 mb-2">
+                      <h4 className="font-medium text-sm text-gray-700 dark:text-gray-300 mt-4 mb-2">
                         Used By
                       </h4>
                       <div className="flex flex-wrap gap-1">
@@ -164,7 +164,7 @@ export default function ToolsPage() {
                           </Link>
                         ))}
                         {usedBy.length === 0 && (
-                          <span className="text-xs text-gray-400">
+                          <span className="text-xs text-gray-400 dark:text-gray-500">
                             No agents
                           </span>
                         )}

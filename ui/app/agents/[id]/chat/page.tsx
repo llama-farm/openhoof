@@ -81,23 +81,23 @@ export default function ChatPage() {
       {/* Header */}
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center space-x-3">
-          <Link href={`/agents/${agentId}`} className="text-gray-500 hover:text-gray-700">
+          <Link href={`/agents/${agentId}`} className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
             ← Back
           </Link>
           <h1 className="text-xl font-bold">Chat with {agentName}</h1>
         </div>
         <button
           onClick={() => setMessages([])}
-          className="text-sm text-gray-500 hover:text-gray-700"
+          className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
         >
           Clear Chat
         </button>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 bg-white rounded-lg shadow overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 bg-white dark:bg-gray-900 rounded-lg shadow dark:shadow-gray-900/20 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-gray-400">
+          <div className="flex items-center justify-center h-full text-gray-400 dark:text-gray-500">
             Start a conversation with {agentName}
           </div>
         ) : (
@@ -110,7 +110,7 @@ export default function ChatPage() {
                 className={`max-w-[80%] rounded-lg px-4 py-2 ${
                   msg.role === "user"
                     ? "bg-blue-500 text-white"
-                    : "bg-gray-100 text-gray-800"
+                    : "bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200"
                 }`}
               >
                 <div className="text-xs opacity-70 mb-1">
@@ -123,7 +123,7 @@ export default function ChatPage() {
         )}
         {loading && (
           <div className="flex justify-start">
-            <div className="bg-gray-100 rounded-lg px-4 py-2 text-gray-500">
+            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg px-4 py-2 text-gray-500 dark:text-gray-400">
               <div className="flex items-center space-x-2">
                 <div className="animate-bounce">●</div>
                 <div className="animate-bounce" style={{ animationDelay: "0.1s" }}>●</div>
@@ -143,7 +143,7 @@ export default function ChatPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={`Message ${agentName}...`}
-            className="flex-1 px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="flex-1 px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100"
             disabled={loading}
           />
           <button

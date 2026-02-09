@@ -63,6 +63,9 @@ class Tool(ABC):
     
     # Whether this tool requires human approval
     requires_approval: bool = False
+
+    # Whether this tool is only available in autonomous mode
+    autonomous_only: bool = False
     
     @abstractmethod
     async def execute(self, params: Dict[str, Any], context: ToolContext) -> ToolResult:
