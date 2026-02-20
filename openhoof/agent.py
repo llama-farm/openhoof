@@ -37,7 +37,7 @@ from typing import Any, Callable, Dict, List, Optional
 from .soul import Soul
 from .memory import Memory
 from .heartbeat import Heartbeat
-from .tools import ToolRegistry
+from .tool_registry import ToolRegistry  # Use simple registry
 from .events import EventQueue, Event
 from .ddil import DDILBuffer
 from .training import TrainingDataCapture
