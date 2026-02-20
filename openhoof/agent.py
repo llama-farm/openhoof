@@ -62,6 +62,7 @@ class Agent:
         model: Optional[str] = None,
         llamafarm_config: Optional[str] = None,
         heartbeat_interval: float = 30.0,
+        max_turns: int = 10,
         workspace: Optional[str] = None
     ):
         """
@@ -75,6 +76,7 @@ class Agent:
             model: Model identifier override (optional)
             llamafarm_config: Path to llamafarm.yaml (defaults to ./llamafarm.yaml)
             heartbeat_interval: Seconds between heartbeats
+            max_turns: Maximum reasoning turns (prevents infinite loops)
             workspace: Working directory (defaults to cwd)
         """
         # Context files
@@ -113,6 +115,9 @@ class Agent:
         self.events_processed = 0
         self.tools_called = 0
         
+        # Configuration
+        self.max_turns = max_turns
+        
         # Custom state (user can attach arbitrary data)
         self.custom: Dict[str, Any] = {}
         
@@ -122,6 +127,7 @@ class Agent:
         print(f"   Tools: {len(self.tools)} registered")
         print(f"   Model: {self.model_loader}")
         print(f"   Heartbeat: every {heartbeat_interval}s")
+        print(f"   Max turns: {max_turns}")
     
     def run(self):
         """
@@ -249,14 +255,14 @@ class Agent:
         
         return result
     
-    def reason(self, prompt: str, max_turns: int = 10) -> Dict[str, Any]:
+    def reason(self, prompt: str, max_turns: Optional[int] = None) -> Dict[str, Any]:
         """
         Use reasoning model to process a prompt with autonomous tool calling.
         The agent will loop: LLM → tool calls → results back to LLM → repeat.
         
         Args:
             prompt: User message or situation description
-            max_turns: Maximum back-and-forth turns (prevents infinite loops)
+            max_turns: Maximum back-and-forth turns (defaults to agent.max_turns)
         
         Returns:
             Final response dict with content
@@ -264,6 +270,9 @@ class Agent:
         # Get tool schemas for LlamaFarm
         tool_schemas = self.tools.to_schema() if len(self.tools) > 0 else None
         system_prompt = self.soul.to_system_prompt()
+        
+        # Use provided max_turns or fall back to agent default
+        max_turns = max_turns if max_turns is not None else self.max_turns
         
         # Build conversation history
         messages = [{"role": "user", "content": prompt}]

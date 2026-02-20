@@ -71,12 +71,17 @@ agent = Agent(
     soul="SOUL.md",
     memory="MEMORY.md",
     tools=MY_TOOLS,
-    executor=my_executor
+    executor=my_executor,
+    max_turns=10  # Max reasoning loops (default: 10)
 )
 
 # Use reasoning model to decide what to do
 response = agent.reason("What's the weather in Portland?")
 # → Calls weather tool automatically if available
+# → Loops until task complete or max_turns reached
+
+# Override max_turns for a specific call
+response = agent.reason("Complex task", max_turns=20)
 
 agent.run()
 ```
