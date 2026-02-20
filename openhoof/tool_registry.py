@@ -80,8 +80,16 @@ class ToolRegistry:
         """Register multiple tools at once."""
         exec_fn = executor or self.executor
         for schema in tools:
-            name = schema["name"]
-            self.tools[name] = Tool(schema, exec_fn)
+            # Support both OpenAI format and direct format
+            if "function" in schema:
+                # OpenAI format: {"type": "function", "function": {...}}
+                tool_schema = schema["function"]
+            else:
+                # Direct format: {"name": "...", "description": "...", ...}
+                tool_schema = schema
+            
+            name = tool_schema["name"]
+            self.tools[name] = Tool(tool_schema, exec_fn)
     
     def register(self, schema: Dict[str, Any], executor: Optional[Callable] = None):
         """Register a single tool."""
