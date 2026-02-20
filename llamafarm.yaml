@@ -10,7 +10,7 @@ endpoint: "http://localhost:11540/v1"  # Universal Runtime for direct model acce
 models:
   # Function router - fast tool routing (<300ms)
   router:
-    model: "functiongemma:270m"
+    model: "unsloth/functiongemma-270m-it-GGUF:Q4_K_M"
     temperature: 0.1
     max_tokens: 512
     purpose: "Tool routing only - maps user intent to tool calls"
@@ -18,15 +18,15 @@ models:
   
   # Reasoning model (laptop/desktop)
   reasoning:
-    model: "qwen2.5:8b"
+    model: "unsloth/Qwen3-1.7B-GGUF:Q4_K_M"
     temperature: 0.7
     max_tokens: 2048
     purpose: "Agent reasoning, decision-making, context understanding"
-    notes: "Good balance of speed and capability for laptop deployment"
+    notes: "Fast and capable for laptop deployment"
   
   # Mobile reasoning model (future Android deployment)
   mobile:
-    model: "llama3.2:1b"
+    model: "bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M"
     temperature: 0.7
     max_tokens: 1024
     purpose: "On-device inference for Android phones"
