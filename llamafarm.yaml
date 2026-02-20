@@ -3,8 +3,8 @@
 
 # LlamaFarm endpoint
 # Server API: http://localhost:14345/v1/projects/{namespace}/{project}/chat/completions
-# Universal Runtime: http://localhost:11540/v1/chat/completions (recommended)
-endpoint: "http://localhost:11540/v1"  # Universal Runtime for direct model access
+# Universal Runtime: http://localhost:11540/v1/chat/completions
+endpoint: "http://localhost:14345/v1"  # LlamaFarm Server API
 
 # Model definitions
 models:
