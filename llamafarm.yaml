@@ -1,8 +1,10 @@
-# LlamaFarm Configuration for MicroClaw
+# LlamaFarm Configuration for OpenHoof
 # Models for agent runtime: router (FunctionGemma) + reasoning (qwen/llama)
 
 # LlamaFarm endpoint
-endpoint: "http://localhost:8765/v1"  # or remote LlamaFarm server
+# Server API: http://localhost:14345/v1/projects/{namespace}/{project}/chat/completions
+# Universal Runtime: http://localhost:11540/v1/chat/completions (recommended)
+endpoint: "http://localhost:11540/v1"  # Universal Runtime for direct model access
 
 # Model definitions
 models:
