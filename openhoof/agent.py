@@ -249,38 +249,79 @@ class Agent:
         
         return result
     
-    def reason(self, prompt: str) -> Dict[str, Any]:
+    def reason(self, prompt: str, max_turns: int = 10) -> Dict[str, Any]:
         """
-        Use reasoning model to process a prompt.
-        Can trigger tool calls via LlamaFarm.
+        Use reasoning model to process a prompt with autonomous tool calling.
+        The agent will loop: LLM → tool calls → results back to LLM → repeat.
         
         Args:
             prompt: User message or situation description
+            max_turns: Maximum back-and-forth turns (prevents infinite loops)
         
         Returns:
-            Response dict with content and optional tool_calls
+            Final response dict with content
         """
         # Get tool schemas for LlamaFarm
         tool_schemas = self.tools.to_schema() if len(self.tools) > 0 else None
+        system_prompt = self.soul.to_system_prompt()
         
-        # Call reasoning model
-        response = self.model_loader.reason(
-            prompt=prompt,
-            tools=tool_schemas,
-            system_prompt=self.soul.to_system_prompt()
-        )
+        # Build conversation history
+        messages = [{"role": "user", "content": prompt}]
         
-        # If model returned tool calls, execute them
-        if response.get("tool_calls"):
-            for tool_call in response["tool_calls"]:
+        turn = 0
+        while turn < max_turns:
+            turn += 1
+            print(f"\n🔄 Turn {turn}/{max_turns}")
+            
+            # Call reasoning model
+            response = self.model_loader.reason(
+                messages=messages,
+                tools=tool_schemas,
+                system_prompt=system_prompt
+            )
+            
+            # Check if model wants to call tools
+            tool_calls = response.get("tool_calls", [])
+            
+            if not tool_calls:
+                # No more tool calls - we're done
+                print(f"✅ Agent complete (no more tool calls)")
+                return response
+            
+            # Execute all tool calls
+            print(f"🔧 Executing {len(tool_calls)} tool call(s)...")
+            
+            # Add assistant message with tool calls to history
+            messages.append({
+                "role": "assistant",
+                "content": response.get("content", ""),
+                "tool_calls": tool_calls
+            })
+            
+            # Execute each tool and collect results
+            for tool_call in tool_calls:
                 func = tool_call.get("function", {})
                 tool_name = func.get("name")
                 tool_params = json.loads(func.get("arguments", "{}"))
+                tool_call_id = tool_call.get("id", f"call_{turn}")
                 
                 # Execute tool
-                self.call_tool(tool_name, tool_params, context=prompt)
+                result = self.call_tool(tool_name, tool_params, context=prompt)
+                
+                # Add tool result to conversation
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "name": tool_name,
+                    "content": json.dumps(result)
+                })
         
-        return response
+        # Max turns reached
+        print(f"⚠️ Max turns ({max_turns}) reached")
+        return {
+            "content": f"[Agent stopped after {max_turns} turns]",
+            "error": "max_turns_reached"
+        }
     
     def push_event(self, event_type: str, data: Dict[str, Any], priority: float = 0.5):
         """Push an event onto the queue."""

@@ -118,16 +118,38 @@ class ToolRegistry:
         """List all registered tool names."""
         return list(self.tools.keys())
     
-    def to_schema(self) -> List[Dict[str, Any]]:
-        """Export all tools as OpenHoof-compatible schemas."""
-        return [
-            {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.parameters
-            }
-            for tool in self.tools.values()
-        ]
+    def to_schema(self, format: str = "openai") -> List[Dict[str, Any]]:
+        """
+        Export all tools as schemas.
+        
+        Args:
+            format: "openai" (with type/function wrapper) or "simple" (direct)
+        
+        Returns:
+            List of tool schemas
+        """
+        if format == "openai":
+            return [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters
+                    }
+                }
+                for tool in self.tools.values()
+            ]
+        else:
+            # Simple format (backward compatible)
+            return [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters
+                }
+                for tool in self.tools.values()
+            ]
     
     def __len__(self) -> int:
         return len(self.tools)

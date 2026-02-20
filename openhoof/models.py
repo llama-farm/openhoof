@@ -88,7 +88,8 @@ class LlamaFarmClient:
     
     def call(
         self,
-        prompt: str,
+        prompt: Optional[str] = None,
+        messages: Optional[List[Dict[str, Any]]] = None,
         model_type: str = "reasoning",
         tools: Optional[List[Dict[str, Any]]] = None,
         system_prompt: Optional[str] = None,
@@ -98,7 +99,8 @@ class LlamaFarmClient:
         Call LlamaFarm with tools + system prompt passed through.
         
         Args:
-            prompt: User message
+            prompt: User message (simple mode) - mutually exclusive with messages
+            messages: Full conversation history (advanced mode)
             model_type: "router" or "reasoning" or "mobile" or "fallback"
             tools: OpenAI-format tool definitions (passed through)
             system_prompt: System prompt (passed through)
@@ -113,18 +115,25 @@ class LlamaFarmClient:
         max_tokens = model_config.get("max_tokens", 2048)
         
         # Build OpenAI-compatible request
-        messages = []
-        
-        if system_prompt:
+        if messages is None:
+            # Simple mode: build messages from prompt
+            messages = []
+            
+            if system_prompt:
+                messages.append({
+                    "role": "system",
+                    "content": system_prompt
+                })
+            
             messages.append({
-                "role": "system",
-                "content": system_prompt
+                "role": "user",
+                "content": prompt
             })
-        
-        messages.append({
-            "role": "user",
-            "content": prompt
-        })
+        else:
+            # Advanced mode: use provided messages
+            # Prepend system prompt if not already present
+            if system_prompt and (not messages or messages[0].get("role") != "system"):
+                messages = [{"role": "system", "content": system_prompt}] + messages
         
         payload = {
             "model": model_name,
@@ -218,16 +227,24 @@ class ModelLoader:
     
     def reason(
         self,
-        prompt: str,
+        prompt: Optional[str] = None,
+        messages: Optional[List[Dict[str, Any]]] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         system_prompt: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Use reasoning model for agent decisions.
         Can also make tool calls.
+        
+        Args:
+            prompt: Simple user message (mutually exclusive with messages)
+            messages: Full conversation history (for multi-turn reasoning)
+            tools: Available tools
+            system_prompt: System prompt
         """
         return self.client.call(
             prompt=prompt,
+            messages=messages,
             model_type="reasoning",
             tools=tools,
             system_prompt=system_prompt
