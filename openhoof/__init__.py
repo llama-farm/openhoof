@@ -41,6 +41,16 @@ from .tools.base import Tool, ToolContext, ToolResult
 from .tools.registry import ToolRegistry
 from .tool_registry import ToolRegistry as SimpleToolRegistry  # Simpler version for basic use
 
+# Built-in tools
+from .builtin_tools import (
+    get_builtin_tool_schemas,
+    builtin_executor,
+    create_tool_schema
+)
+
+# Bootstrap
+from .bootstrap import bootstrap_agent
+
 __all__ = [
     # Agent runtime
     "Agent",
@@ -61,4 +71,12 @@ __all__ = [
     "ToolResult",
     "ToolRegistry",
     "SimpleToolRegistry",
+    
+    # Built-in tools
+    "get_builtin_tool_schemas",
+    "builtin_executor",
+    "create_tool_schema",
+    
+    # Bootstrap
+    "bootstrap_agent",
 ]
