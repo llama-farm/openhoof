@@ -1,0 +1,35 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"   # Trigger on v2.0.0, v2.1.0, etc.
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # Required for trusted publishing (no token needed!)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build distributions
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # Uses PyPI Trusted Publishing (OIDC) — no API token stored in secrets!
+        # Setup: pypi.org → Account → Publishing → Add pending publisher
+        #   Owner: llama-farm
+        #   Repo: openhoof
+        #   Workflow: publish.yml
+        #   Environment: pypi
