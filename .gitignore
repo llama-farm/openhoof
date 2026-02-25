@@ -78,3 +78,13 @@ fused_model/
 *.safetensors
 *.gguf
 .venv-train/
+
+# Agent workspace runtime files (belong in ~/.openhoof/, not repo)
+.microclaw/
+SOUL.md
+MEMORY.md
+memory/
+test_agent_workspace/
+
+# Training data (captured at runtime, not committed)
+*.jsonl
