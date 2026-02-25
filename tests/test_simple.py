@@ -1,29 +1,24 @@
-#!/usr/bin/env python3
 """
-Simple test to prove OpenHoof v2.0 agent actually works.
-Tests: agent loop, tool calling, heartbeat, graceful shutdown.
+Tests for OpenHoof v2.0 core agent functionality.
+Offline — no LlamaFarm required.
+Tests: Agent init, tool registry, heartbeat, event loop, graceful shutdown.
 """
 
 import time
-from openhoof import Agent, Soul, Memory
+import pytest
+from openhoof import Agent
 
 
-# 1. Simple tools (just functions)
+# --- Tools ---
+
 def add_numbers(a: int, b: int) -> dict:
-    """Add two numbers."""
-    result = a + b
-    print(f"   ➤ add_numbers({a}, {b}) = {result}")
-    return {"result": result}
+    return {"result": a + b}
 
 
-def get_time() -> dict:
-    """Get current timestamp."""
-    now = time.time()
-    print(f"   ➤ get_time() = {now}")
-    return {"timestamp": now}
+def get_time_tool() -> dict:
+    return {"timestamp": time.time()}
 
 
-# 2. Tool schemas (OpenAI format)
 SIMPLE_TOOLS = [
     {
         "type": "function",
@@ -33,79 +28,106 @@ SIMPLE_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "a": {"type": "integer", "description": "First number"},
-                    "b": {"type": "integer", "description": "Second number"}
+                    "a": {"type": "integer"},
+                    "b": {"type": "integer"},
                 },
-                "required": ["a", "b"]
-            }
-        }
+                "required": ["a", "b"],
+            },
+        },
     },
     {
         "type": "function",
         "function": {
-            "name": "get_time",
+            "name": "get_time_tool",
             "description": "Get current Unix timestamp",
-            "parameters": {"type": "object", "properties": {}}
-        }
-    }
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
 ]
 
 
-# 3. Tool executor (maps tool names to functions)
 def execute_tool(tool_name: str, params: dict) -> dict:
-    """Execute a tool by name."""
     if tool_name == "add_numbers":
         return add_numbers(**params)
-    elif tool_name == "get_time":
-        return get_time()
-    else:
-        return {"error": f"Unknown tool: {tool_name}"}
+    elif tool_name == "get_time_tool":
+        return get_time_tool()
+    return {"error": f"Unknown tool: {tool_name}"}
 
 
-# 4. Create minimal context files
-SOUL_CONTENT = """# SOUL.md
-- **Name:** TestBot
-- **Emoji:** 🤖
-- **Mission:** Test OpenHoof v2.0 agent runtime
-"""
+# --- Tests ---
 
-MEMORY_CONTENT = """# MEMORY.md
-Test agent memory — created during simple test.
-"""
-
-
-if __name__ == "__main__":
-    print("🐴 OpenHoof v2.0 Simple Test\n")
-    
-    # Write context files
-    with open("SOUL.md", "w") as f:
-        f.write(SOUL_CONTENT)
-    with open("MEMORY.md", "w") as f:
-        f.write(MEMORY_CONTENT)
-    
-    # Create agent
+def test_agent_initializes(agent_workspace):
+    """Agent initializes with soul, memory, tools."""
     agent = Agent(
-        soul="SOUL.md",
-        memory="MEMORY.md",
+        soul=str(agent_workspace / "SOUL.md"),
+        memory=str(agent_workspace / "MEMORY.md"),
         tools=SIMPLE_TOOLS,
         executor=execute_tool,
-        heartbeat_interval=2.0  # Beat every 2 seconds for quick test
     )
-    
-    # Add exit condition (stop after 3 heartbeats)
-    agent.on_exit("max_heartbeats", lambda: agent.heartbeat.beat_count >= 3)
-    
-    # Push some test events
-    print("\n📤 Pushing test events...")
-    agent.push_event("tool_call", {"tool": "get_time", "params": {}}, priority=0.8)
-    agent.push_event("tool_call", {"tool": "add_numbers", "params": {"a": 5, "b": 3}}, priority=0.9)
-    agent.push_event("tool_call", {"tool": "add_numbers", "params": {"a": 100, "b": 42}}, priority=0.5)
-    
-    # Run agent (blocks until exit condition)
-    print("\n▶️  Starting agent loop...\n")
-    agent.run()
-    
-    print("\n✅ Test complete!")
-    print(f"   Events processed: {agent.events_processed}")
-    print(f"   Tools called: {agent.tools_called}")
-    print(f"   Heartbeats: {agent.heartbeat.beat_count}")
+    assert agent is not None
+    assert agent.max_turns == 10  # default
+
+
+def test_tool_registry(agent_workspace):
+    """Tool registry registers and can list tools."""
+    agent = Agent(
+        soul=str(agent_workspace / "SOUL.md"),
+        memory=str(agent_workspace / "MEMORY.md"),
+        tools=SIMPLE_TOOLS,
+        executor=execute_tool,
+    )
+    schemas = agent.tools.to_schema()
+    names = [s["function"]["name"] for s in schemas]
+    assert "add_numbers" in names
+    assert "get_time_tool" in names
+
+
+def test_tool_execution(agent_workspace):
+    """Tools execute and return correct results."""
+    agent = Agent(
+        soul=str(agent_workspace / "SOUL.md"),
+        memory=str(agent_workspace / "MEMORY.md"),
+        tools=SIMPLE_TOOLS,
+        executor=execute_tool,
+    )
+    result = agent.call_tool("add_numbers", {"a": 5, "b": 3})
+    assert result["result"] == 8
+
+
+def test_heartbeat_system(agent_workspace):
+    """Heartbeat initializes and tracks beat count."""
+    agent = Agent(
+        soul=str(agent_workspace / "SOUL.md"),
+        memory=str(agent_workspace / "MEMORY.md"),
+        tools=SIMPLE_TOOLS,
+        executor=execute_tool,
+        heartbeat_interval=0.1,
+    )
+    assert agent.heartbeat is not None
+    assert agent.heartbeat.beat_count == 0
+
+
+def test_exit_condition_stops_loop(agent_workspace):
+    """Agent stops when exit condition is met."""
+    agent = Agent(
+        soul=str(agent_workspace / "SOUL.md"),
+        memory=str(agent_workspace / "MEMORY.md"),
+        tools=SIMPLE_TOOLS,
+        executor=execute_tool,
+        heartbeat_interval=0.05,
+    )
+    agent.on_exit("immediate", lambda: True)  # Exit immediately
+    agent.run()  # Should return quickly
+    assert True  # If we get here, exit worked
+
+
+def test_event_queue(agent_workspace):
+    """Events can be pushed to the queue."""
+    agent = Agent(
+        soul=str(agent_workspace / "SOUL.md"),
+        memory=str(agent_workspace / "MEMORY.md"),
+        tools=SIMPLE_TOOLS,
+        executor=execute_tool,
+    )
+    agent.push_event("test_event", {"data": "hello"}, priority=0.9)
+    assert agent.events.size() > 0

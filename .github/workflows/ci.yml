@@ -26,6 +26,7 @@ jobs:
       - name: Lint
         run: ruff check openhoof/
 
-      - name: Test
+      - name: Test (offline)
         run: pytest tests/test_simple.py tests/test_max_turns.py -v
-        # Note: LLM tests (test_with_llm, test_multi_tool) require local LlamaFarm
+        # LLM tests (test_with_llm, test_multi_tool, test_builtin_tools) require
+        # a running LlamaFarm instance — run locally only
