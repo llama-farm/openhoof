@@ -1,423 +1,233 @@
-# 🦙 OpenHoof v2.0
+# OpenHoof v2.0
 
-**Local AI agent runtime library with FunctionGemma training**
+**Standalone agent runtime library for autonomous LLM agents — runs on-device, no server required.**
 
-OpenHoof is a standalone, extensible library for running AI agents that persist across sessions, respond to events, and coordinate with each other. Built to work with [LlamaFarm](https://github.com/llama-farm/llamafarm) for local inference.
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     YOUR APPLICATION                        │
-│              (Drone Control, Medical, etc.)                 │
-├─────────────────────────────────────────────────────────────┤
-│                          │                                  │
-│                    Agent Runtime                            │
-│                          ▼                                  │
-├─────────────────────────────────────────────────────────────┤
-│                      O P E N H O O F                        │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐        │
-│  │  Agent  │  │  Soul   │  │ Memory  │  │ Tools   │        │
-│  │  Loop   │  │ Loading │  │ Recall  │  │Registry │        │
-│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘        │
-│       │            │            │            │              │
-│       └────────────┴─────┬──────┴────────────┘              │
-│                          │                                  │
-│                    LlamaFarm                                │
-│                  (local inference)                          │
-└─────────────────────────────────────────────────────────────┘
-```
+[![PyPI version](https://img.shields.io/pypi/v/openhoof.svg)](https://pypi.org/project/openhoof/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
 
 ---
 
-## ✨ What's New in v2.0
+**v1 was a FastAPI server.** WebSockets, session management, a CLI, a UI, a gateway. You needed it running somewhere reachable to use it.
 
-**Complete rebuild** as a standalone library (was a server framework in v1.x):
-
-- **🎯 Agent Runtime** — Event loop, heartbeat, exit conditions
-- **🧠 Context Files** — SOUL.md, MEMORY.md, USER.md, TOOLS.md as first-class citizens
-- **💾 DDIL** — Store-and-forward for offline operation (Denied/Degraded/Intermittent/Limited networks)
-- **🔌 LlamaFarm Integration** — Tools + prompts passed through in API calls
-- **📡 Training Data Capture** — Every tool call logged for fine-tuning
-- **🎓 FunctionGemma Pipeline** — Auto-generate training data, fine-tune tool routing model (GOLD!)
-- **📱 Runs Anywhere** — Python (now) → Kotlin (Android) → Rust (cross-platform)
+**v2 is a library.** `pip install openhoof`. Import it. Your agent runs anywhere — laptop, phone, edge device, Rust daemon.
 
 ---
 
-## 🚀 Quick Start
-
-### Installation
+## Install
 
 ```bash
-pip install -e git+https://github.com/llama-farm/openhoof.git@feat/microclaw-rebuild#egg=openhoof
+pip install openhoof
 ```
 
-### Basic Usage
+Or from source:
 
-```python
-from openhoof import Agent, Soul, Memory
-
-# Define your tools (OpenAI-compatible format)
-tools = [
-    {
-        "name": "get_weather",
-        "description": "Get current weather for a location",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "location": {"type": "string"}
-            },
-            "required": ["location"]
-        }
-    }
-]
-
-# Tool executor (your implementation)
-def execute_tool(tool_name: str, params: dict) -> dict:
-    if tool_name == "get_weather":
-        return {"temp": 72, "condition": "sunny"}
-    return {"error": "Unknown tool"}
-
-# Create agent
-agent = Agent(
-    soul="SOUL.md",  # Your agent's identity + mission
-    memory="MEMORY.md",  # Long-term recall
-    tools=tools,
-    executor=execute_tool,
-    llamafarm_config="llamafarm.yaml",  # LlamaFarm models
-    heartbeat_interval=30.0
-)
-
-# Exit conditions
-agent.on_exit("timeout", lambda: time.time() - agent.start_time > 1800)
-
-# Heartbeat callbacks
-agent.on_heartbeat(lambda: print(f"💓 Still alive"))
-
-# Run agent
-agent.run()
+```bash
+git clone https://github.com/llama-farm/openhoof.git
+cd openhoof
+pip install -e .
 ```
 
 ---
 
-## 📖 Core Concepts
-
-### Context Files
-
-OpenHoof agents are defined by markdown files:
-
-```
-my-agent/
-├── SOUL.md          # Identity, mission, style, constraints
-├── MEMORY.md        # Long-term recall, persistent context
-├── USER.md          # Who the agent serves, preferences
-└── TOOLS.md         # Available capabilities, tool docs
-```
-
-**SOUL.md example:**
-```markdown
-# SOUL.md - Weather Agent
-
-You are a helpful weather assistant AI.
-
-**Name:** WeatherBot
-**Emoji:** ☀️
-
-## Mission
-Provide accurate, timely weather information to users.
-
-## Style
-- Be concise and factual
-- Always include units (°F, mph, etc.)
-- Warn about severe weather
-```
-
-### Tool Schema Format
-
-OpenHoof uses **OpenAI-compatible tool schemas** (same format Ace uses):
+## Quick Start
 
 ```python
-{
-    "name": "drone_takeoff",
-    "description": "Take off and hover at specified altitude",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "alt_m": {"type": "number", "description": "Altitude in meters"},
-        },
-        "required": ["alt_m"]
-    }
-}
+from openhoof import Agent, bootstrap_agent, get_builtin_tool_schemas, create_tool_schema
+
+# 1. Create a complete agent workspace (SOUL.md, MEMORY.md, HEARTBEAT.md, etc.)
+bootstrap_agent(
+    workspace="./my-agent",
+    name="MyBot",
+    emoji="🤖",
+    mission="Your mission here",
+    user_name="Rob",
+    timezone="America/Chicago"
+)
+
+# 2. Define your tools (OpenAI-compatible format)
+my_tool = create_tool_schema(
+    name="get_status",
+    summary="Get current system status",
+    parameters={"type": "object", "properties": {"system": {"type": "string"}}, "required": ["system"]}
+)
+
+def my_executor(tool_name: str, params: dict) -> dict:
+    if tool_name == "get_status":
+        return {"status": "operational", "uptime": "4h"}
+    return {"error": "unknown tool"}
+
+# 3. Run the agent — it chains tool calls autonomously until the task is done
+agent = Agent(
+    soul="./my-agent/SOUL.md",
+    memory="./my-agent/MEMORY.md",
+    tools=get_builtin_tool_schemas() + [my_tool],
+    executor=my_executor,
+    workspace="./my-agent",
+    max_turns=10
+)
+
+response = agent.reason("Check system status and log the result")
+print(response)
 ```
 
-### Heartbeat System
+---
 
-Agents run a heartbeat loop every N seconds:
+## How It Works
+
+`agent.reason(prompt)` runs a multi-turn loop — the LLM decides which tools to call, executes them, feeds results back in, and repeats until the task is complete:
+
+```
+Turn 1: LLM → call get_status("server") → "operational, 4h uptime"
+Turn 2: LLM → call log("Server operational") → logged to memory
+Turn 3: LLM → no more tool calls → "Server is operational. Uptime: 4h. Logged."
+```
+
+`max_turns` is configurable at init or per-call:
+```python
+agent = Agent(..., max_turns=20)
+response = agent.reason("complex task", max_turns=5)  # per-call override
+```
+
+---
+
+## Built-in Tools
+
+Every agent gets 10+ built-in tools automatically — no extra setup:
+
+| Tool | What it does |
+|------|-------------|
+| `memory_search(query)` | Semantic search across MEMORY.md |
+| `memory_append(text)` | Append to daily memory log |
+| `memory_read()` | Read full MEMORY.md |
+| `get_time()` | Current timestamp |
+| `log(msg, level)` | Structured log with emoji levels |
+| `save_state(key, value)` | Persist state across sessions |
+| `load_state(key)` | Restore saved state |
+| `mission_start(id, goal)` | Start mission with fresh context |
+| `checkpoint(summary)` | Save progress mid-mission |
+| `mission_complete(summary)` | Archive mission + clear context |
+| `read_soul()` | Load SOUL.md on demand |
+| `read_user()` | Load USER.md on demand |
+| `read_agents()` | Load AGENTS.md on demand |
+| `read_tool_guide(tool)` | Load tool-specific guidance |
+
+### Token Budget Strategy
+
+Mobile models have 2,048 tokens total. Loading all context upfront wastes most of it.
+
+OpenHoof keeps the system prompt to **~200 tokens** (SOUL.md core only). Everything else lazy-loads via built-in tools when the agent actually needs it:
 
 ```python
-# Check exit conditions
-agent.on_exit("battery_low", lambda: agent.custom.get("battery") < 20)
-agent.on_exit("timeout", lambda: runtime > 1800)
-
-# Custom heartbeat actions
-def heartbeat():
-    battery = get_battery()
-    agent.custom["battery"] = battery
-    if battery < 30:
-        print("⚠️ Low battery!")
-
-agent.on_heartbeat(heartbeat)
+memory_search("last waypoint altitude")   # 3 snippets, ~80 tokens
+read_tool_guide("drone_goto")             # tool guidance on-demand
 ```
 
-### DDIL (Store-and-Forward)
+**Result: 95% of context window available for actual work.**
 
-When network is unavailable, agents buffer data locally:
+---
 
-```python
-# Store data when offline
-agent.ddil.store("telemetry", {
-    "lat": 41.8781,
-    "lon": -87.6298,
-    "battery": 85
-})
+## LlamaFarm Integration
 
-# Sync when network returns
-agent.ddil.sync_to_server("http://gateway.local")
-```
-
-### LlamaFarm Integration
-
-Configure models in `llamafarm.yaml`:
+Configure your models in `llamafarm.yaml`:
 
 ```yaml
-endpoint: "http://localhost:8765/v1"
+llamafarm:
+  endpoint: "http://localhost:11540/v1"
 
 models:
   router:
-    model: "functiongemma:270m"  # Fast tool routing
-    temperature: 0.1
-  
+    model: "functiongemma"       # Fast tool routing (<300ms)
   reasoning:
-    model: "qwen2.5:8b"  # Agent reasoning
-    temperature: 0.7
-  
+    model: "unsloth/Qwen3-1.7B-GGUF"  # Agentic loop
+  mobile:
+    model: "llama3.2:1b"         # On-device (phone)
   fallback:
-    model: "gpt-4o-mini"  # Cloud fallback
-```
-
-Use in agent:
-
-```python
-# Reason about a situation (can trigger tool calls)
-response = agent.reason("Should I continue if battery is 25%?")
-print(response['content'])
+    model: "gpt-4o-mini"         # Cloud fallback
 ```
 
 ---
 
-## 🎓 FunctionGemma Training Pipeline (THE GOLD!)
+## DDIL Support
 
-OpenHoof includes an **automated training pipeline** for fine-tuning FunctionGemma on your tool calling patterns.
+Built for offline-first operation — Denied, Degraded, Intermittent, Limited networks:
 
-### How It Works
+- **Store-and-forward**: Data buffers locally when offline, syncs when connectivity returns
+- **Local model fallback**: Agent loop continues with on-device models during outages
+- **Checkpoint/resume**: Mission progress saved so agents recover from crashes
 
-1. **Data Collection** — Every tool call (input → tool selection → result) logged as training data
-2. **Synthetic Generation** — Auto-generate diverse examples for each tool
-3. **LoRA Fine-tuning** — Train FunctionGemma-270M on your tools (<300ms routing)
-4. **GGUF Export** — Export trained model for deployment
-5. **Hot-swap** — Update LlamaFarm with new model
+```python
+from openhoof import Agent, DDILBuffer
 
-### Usage
+agent = Agent(..., ddil_enabled=True)
+agent.run()  # Keeps running even when network drops
+```
+
+---
+
+## FunctionGemma Training Pipeline
+
+Fine-tune a 270M parameter model to route tool calls with >99% accuracy in <300ms.
+
+Every tool call the agent makes is automatically captured as JSONL training data:
 
 ```bash
-# Check training data status
-python -m openhoof.training.pipeline status
+# Check captured training data
+python -m training.pipeline status
 
-# Generate synthetic training data
-python -m openhoof.training.pipeline generate --count 100
+# Fine-tune FunctionGemma on your captured data
+python -m training.pipeline run
 
-# Run full training pipeline
-python -m openhoof.training.pipeline run
-
-# Export data for inspection
-python -m openhoof.training.pipeline export
+# Export for deployment
+python -m training.pipeline export
 ```
 
-### Training Data Format
-
-```json
-{
-  "input": {
-    "user_message": "Check the weather in Chicago",
-    "tools": ["get_weather", "set_reminder", "search_web"]
-  },
-  "output": {
-    "tool_calls": [
-      {"name": "get_weather", "arguments": {"location": "Chicago"}}
-    ]
-  },
-  "metadata": {
-    "source": "live_usage",
-    "timestamp": "2026-02-20T15:00:00"
-  }
-}
-```
-
-This is logged automatically by `TrainingDataCapture` on every tool call.
+Run missions → capture data → fine-tune → your router learns your exact domain.
 
 ---
 
-## 🏗️ Project Structure
+## Repo Structure
 
 ```
-openhoof/
-├── openhoof/                 # Python library
-│   ├── agent.py              # Core Agent class
-│   ├── soul.py               # SOUL.md loading
-│   ├── memory.py             # MEMORY.md + semantic search
-│   ├── heartbeat.py          # Heartbeat + exit conditions
-│   ├── events.py             # Event queue
-│   ├── ddil.py               # Store-and-forward buffer
-│   ├── training.py           # Training data capture
-│   ├── models.py             # LlamaFarm integration
-│   ├── tools/                # Tool base classes + registry
-│   │   ├── base.py           # Tool base class
-│   │   ├── registry.py       # ToolRegistry
-│   │   └── builtin/          # Built-in tools
-│   └── tool_registry.py      # Simple registry (for basic use)
-├── training/                 # FunctionGemma pipeline (THE GOLD!)
-│   ├── pipeline.py           # Training pipeline orchestration
-│   └── train_tool_router.py # LoRA fine-tuning script
-├── examples/                 # Example agents
-├── tests/                    # Unit tests
-└── llamafarm.yaml            # LlamaFarm config
+openhoof/               # Library (pip install openhoof)
+├── agent.py            # Core Agent class + reasoning loop
+├── soul.py             # SOUL.md loading → system prompt
+├── memory.py           # MEMORY.md + semantic search
+├── heartbeat.py        # Heartbeat + exit conditions
+├── events.py           # Event queue
+├── ddil.py             # Store-and-forward buffer
+├── training.py         # Training data capture (JSONL)
+├── models.py           # LlamaFarm model integration
+├── tool_registry.py    # Tool registration + execution
+├── bootstrap.py        # Workspace bootstrapping
+└── builtin_tools/      # 10+ built-in agent tools
+
+training/               # FunctionGemma fine-tuning pipeline
+├── pipeline.py         # Training orchestration
+└── train_tool_router.py
+
+examples/               # Example agent configs
+├── basic-agent/
+├── drone-agent/
+├── fuel-analyst/
+├── orchestrator/
+└── customer-support/
+
+docs/                   # Design docs
+tests/                  # Test suite
 ```
 
 ---
 
-## 🔧 Tool Schema (What Ace Uses)
+## Roadmap
 
-OpenHoof defines a **tool schema format** that's 100% OpenAI-compatible. This is what Ace uses (not the library itself, just the format):
-
-```python
-DRONE_TOOLS = [
-    {
-        "name": "drone_takeoff",
-        "description": "Take off and hover at specified altitude",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "alt_m": {"type": "number", "default": 15.0}
-            },
-            "required": []
-        }
-    },
-    {
-        "name": "drone_move",
-        "description": "Move relative to current position",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "north_m": {"type": "number", "default": 0.0},
-                "east_m": {"type": "number", "default": 0.0},
-                "up_m": {"type": "number", "default": 0.0},
-                "yaw_deg": {"type": "number", "default": 0.0}
-            },
-            "required": []
-        }
-    }
-]
-```
-
-This format works with:
-- FunctionGemma fine-tuning
-- LlamaFarm tool calling
-- OpenAI API (if using cloud fallback)
+- **Phase 2 (now):** Pure Kotlin Android — direct DJI SDK + ONNX Runtime, no React Native
+- **Phase 3:** Rust core with JNI/PyO3 bindings — same runtime, any platform
 
 ---
 
-## 📦 Installation & Development
+## License
 
-```bash
-# Clone the repo
-git clone https://github.com/llama-farm/openhoof.git
-cd openhoof
+Apache 2.0 — see [LICENSE](LICENSE)
 
-# Install in development mode
-pip install -e .
-
-# Run tests
-pytest tests/
-
-# Generate synthetic training data
-python -m openhoof.training.pipeline generate --count 100
-
-# Train FunctionGemma
-python -m openhoof.training.pipeline run
-```
-
----
-
-## 🎯 Example: Drone Agent
-
-```python
-from openhoof import Agent
-from my_drone_tools import DRONE_TOOLS, DroneToolExecutor
-
-agent = Agent(
-    soul="SOUL.md",
-    memory="MEMORY.md",
-    tools=DRONE_TOOLS,
-    executor=DroneToolExecutor(),
-    heartbeat_interval=30.0
-)
-
-# Exit on battery low or geofence breach
-agent.on_exit("battery_low", lambda: agent.custom.get("battery") < 20)
-agent.on_exit("geofence", lambda: not agent.custom.get("in_bounds"))
-
-# Sync telemetry on heartbeat
-def heartbeat():
-    telemetry = get_telemetry()
-    agent.custom["battery"] = telemetry.battery
-    agent.custom["in_bounds"] = telemetry.in_geofence
-    
-    # Buffer telemetry for DDIL
-    agent.ddil.store("telemetry", telemetry.to_dict())
-
-agent.on_heartbeat(heartbeat)
-
-# Run agent
-agent.run()
-```
-
----
-
-## 🔄 Migration from v1.x
-
-**v1.x was a server** (FastAPI + WebSockets + UI)  
-**v2.0 is a library** (standalone agent runtime)
-
-If you were using v1.x:
-- **Server features** → Moved to separate project (TBD)
-- **Agent runtime** → Now a library you import
-- **Tool schemas** → 100% compatible, no changes needed
-- **Training pipeline** → Still here, improved!
-
----
-
-## 📜 License
-
-Apache 2.0
-
----
-
-## 🙏 Acknowledgments
-
-- [LlamaFarm](https://github.com/llama-farm/llamafarm) — Local LLM inference
-- Built with ❤️ for anyone who needs reliable local AI agents
-- Special thanks to Ace (drone agent) for validating the architecture
-
----
-
-**Ready to build agents that kick into action?** 🦙
-
-*No llamas were harmed in the making of this library. Several were bedazzled.*
+Built by [LlamaFarm](https://github.com/llama-farm)
