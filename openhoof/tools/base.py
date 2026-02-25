@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ class Tool(ABC):
     async def validate_params(self, params: Dict[str, Any]) -> Optional[str]:
         """Validate parameters. Returns error message if invalid."""
         required = self.parameters.get("required", [])
-        for field in required:
-            if field not in params:
-                return f"Missing required parameter: {field}"
+        for param in required:
+            if param not in params:
+                return f"Missing required parameter: {param}"
         return None

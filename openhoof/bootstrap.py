@@ -1,8 +1,6 @@
 """Bootstrap new agent workspaces with minimal edge-optimized templates."""
 
 from pathlib import Path
-from typing import Optional
-import importlib.resources
 
 
 def bootstrap_agent(

@@ -31,7 +31,6 @@ from __future__ import annotations
 import json
 import os
 import time
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from .soul import Soul
@@ -121,7 +120,7 @@ class Agent:
         # Custom state (user can attach arbitrary data)
         self.custom: Dict[str, Any] = {}
         
-        print(f"🐴 MicroClaw Agent initialized")
+        print("🐴 MicroClaw Agent initialized")
         print(f"   Soul: {self.soul.name} {self.soul.emoji}")
         print(f"   Memory: {self.memory}")
         print(f"   Tools: {len(self.tools)} registered")
@@ -294,7 +293,7 @@ class Agent:
             
             if not tool_calls:
                 # No more tool calls - we're done
-                print(f"✅ Agent complete (no more tool calls)")
+                print("✅ Agent complete (no more tool calls)")
                 return response
             
             # Execute all tool calls

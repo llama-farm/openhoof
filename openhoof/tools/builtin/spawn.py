@@ -72,7 +72,7 @@ The sub-agent will run asynchronously and results will be announced when complet
                         "label": label or task[:50],
                         "status": "spawned"
                     },
-                    message=f"Sub-agent spawned. Results will be announced when complete."
+                    message="Sub-agent spawned. Results will be announced when complete."
                 )
             except Exception as e:
                 return ToolResult(

@@ -13,11 +13,9 @@ Phase 2: Proper embeddings
 
 from __future__ import annotations
 
-import os
-import re
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List
 
 
 class MemorySearchResult:

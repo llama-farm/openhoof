@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 from ..base import Tool, ToolResult, ToolContext
 

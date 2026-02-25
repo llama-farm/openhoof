@@ -12,7 +12,6 @@ Becomes the system prompt for the agent's reasoning model.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Optional
 

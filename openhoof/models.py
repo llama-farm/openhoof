@@ -14,9 +14,6 @@ so we just need to define models and make API calls.
 
 from __future__ import annotations
 
-import json
-import os
-import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -203,7 +200,7 @@ class ModelLoader:
         self.config = LlamaFarmConfig(config_path)
         self.client = LlamaFarmClient(self.config)
         
-        print(f"🦙 LlamaFarm initialized")
+        print("🦙 LlamaFarm initialized")
         print(f"   Endpoint: {self.config.endpoint}")
         print(f"   Router: {self.config.get_model_config('router').get('model', 'N/A')}")
         print(f"   Reasoning: {self.config.get_model_config('reasoning').get('model', 'N/A')}")
