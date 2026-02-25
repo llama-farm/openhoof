@@ -3,14 +3,11 @@ name: Publish to PyPI
 on:
   push:
     tags:
-      - "v*"   # Trigger on v2.0.0, v2.1.0, etc.
+      - "v*"   # Trigger on v2.0.1, v2.1.0, etc.
 
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write  # Required for trusted publishing (no token needed!)
 
     steps:
       - uses: actions/checkout@v4
@@ -20,16 +17,16 @@ jobs:
           python-version: "3.11"
 
       - name: Install build tools
-        run: pip install build
+        run: pip install build twine
 
       - name: Build distributions
         run: python -m build
 
+      - name: Check distributions
+        run: twine check dist/*
+
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        # Uses PyPI Trusted Publishing (OIDC) — no API token stored in secrets!
-        # Setup: pypi.org → Account → Publishing → Add pending publisher
-        #   Owner: llama-farm
-        #   Repo: openhoof
-        #   Workflow: publish.yml
-        #   Environment: pypi
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: twine upload dist/*
