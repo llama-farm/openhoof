@@ -67,6 +67,10 @@ out/
 ~/.openhoof/
 data/
 
+# Build artifacts
+dist/
+build/
+
 # Temp files
 *.tmp
 *.temp
