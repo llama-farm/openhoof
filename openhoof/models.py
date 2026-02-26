@@ -4,18 +4,49 @@ Models — LlamaFarm integration for agent inference.
 This module handles:
 1. Loading llamafarm.yaml config
 2. Calling LlamaFarm endpoint with tools + system prompt
-3. Router model (FunctionGemma) for fast tool routing
+3. Router model (FunctionGemma) for fast tool routing + param validation
 4. Reasoning model (qwen/llama) for agent decisions
 5. Fallback to OpenAI when needed
 
-LlamaFarm now accepts tools + prompts passed through in the request,
-so we just need to define models and make API calls.
+Two-model orchestration:
+- Reasoner drives the loop (decides WHAT to do)
+- Router validates/normalizes execution (decides HOW to do it precisely)
+- Router is optional — single-model mode works identically to before
 """
 
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+@dataclass
+class RouterResult:
+    """
+    Result from the router model (FunctionGemma) validation step.
+
+    Confidence heuristic (Phase 1):
+    - FunctionGemma agrees on same tool → 0.95 (use its normalized params)
+    - FunctionGemma disagrees (different tool) → 0.2 (fall back to Reasoner)
+    - FunctionGemma returns no tool call → 0.0 (fall back to Reasoner)
+
+    Phase 2: Replace heuristic with real logprob-based confidence from model.
+    """
+    tool_name: str          # Tool FunctionGemma chose
+    params: Dict[str, Any]  # Normalized/validated params
+    confidence: float       # 0.0 – 1.0
+    agreed: bool            # True if FunctionGemma picked same tool as Reasoner
+    raw_response: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "tool_name": self.tool_name,
+            "params": self.params,
+            "confidence": self.confidence,
+            "agreed": self.agreed,
+        }
 
 try:
     import yaml
@@ -176,6 +207,74 @@ class LlamaFarmClient:
             "usage": response.get("usage", {}),
         }
     
+    def validate_tool_call(
+        self,
+        tool_name: str,
+        params: Dict[str, Any],
+        context_messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        system_prompt: Optional[str] = None,
+    ) -> "RouterResult":
+        """
+        Ask router model (FunctionGemma) to validate and normalize a tool call.
+
+        The Reasoner has already decided WHAT to do. FunctionGemma's job here
+        is to validate the params are correct and normalize any ambiguous values
+        (e.g., "fly north 200m" → {"bearing": 0, "distance": 200, "unit": "meters"}).
+
+        Args:
+            tool_name: Tool the Reasoner decided to call
+            params: Params the Reasoner provided
+            context_messages: Recent conversation (last 3 messages for context)
+            tools: All available tool schemas
+            system_prompt: Optional system prompt
+
+        Returns:
+            RouterResult with confidence score and normalized params
+        """
+        response = self.call(
+            messages=context_messages,
+            model_type="router",
+            tools=tools,
+            system_prompt=system_prompt,
+        )
+
+        tool_calls = response.get("tool_calls", [])
+
+        if not tool_calls:
+            # Router returned no tool call → low confidence, use Reasoner's params
+            return RouterResult(
+                tool_name=tool_name,
+                params=params,
+                confidence=0.0,
+                agreed=False,
+                raw_response=response,
+            )
+
+        fg_call = tool_calls[0]
+        fg_func = fg_call.get("function", {})
+        fg_name = fg_func.get("name", "")
+        try:
+            fg_params = json.loads(fg_func.get("arguments", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            fg_params = params
+
+        agreed = fg_name == tool_name
+
+        # Phase 1 confidence heuristic:
+        # - Same tool → 0.95 (FunctionGemma agrees, use its normalized params)
+        # - Different tool → 0.2 (FunctionGemma disagrees, fall through)
+        # Phase 2: use actual logprobs from model for real confidence scores
+        confidence = 0.95 if agreed else 0.2
+
+        return RouterResult(
+            tool_name=fg_name if agreed else tool_name,
+            params=fg_params if agreed else params,
+            confidence=confidence,
+            agreed=agreed,
+            raw_response=response,
+        )
+
     def _mock_response(self, prompt: str, tools: Optional[List]) -> Dict[str, Any]:
         """Mock response when requests unavailable."""
         return {
@@ -199,11 +298,18 @@ class ModelLoader:
     def __init__(self, config_path: str = "llamafarm.yaml"):
         self.config = LlamaFarmConfig(config_path)
         self.client = LlamaFarmClient(self.config)
-        
+
+        router_model = self.config.get_model_config("router").get("model", "")
+        reasoning_model = self.config.get_model_config("reasoning").get("model", "")
+        self._router_configured = bool(router_model and router_model != reasoning_model)
+
         print("🦙 LlamaFarm initialized")
         print(f"   Endpoint: {self.config.endpoint}")
-        print(f"   Router: {self.config.get_model_config('router').get('model', 'N/A')}")
-        print(f"   Reasoning: {self.config.get_model_config('reasoning').get('model', 'N/A')}")
+        if self._router_configured:
+            print(f"   Router:    {router_model}  ← fast execution")
+            print(f"   Reasoning: {reasoning_model}  ← agent loop")
+        else:
+            print(f"   Model:     {reasoning_model or router_model}  ← single-model mode")
     
     def route_tool(
         self,
@@ -247,21 +353,44 @@ class ModelLoader:
             system_prompt=system_prompt
         )
     
+    def has_router(self) -> bool:
+        """True if a separate router model (FunctionGemma) is configured."""
+        return self._router_configured
+
+    def validate_tool_call(
+        self,
+        tool_name: str,
+        params: Dict[str, Any],
+        context_messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        system_prompt: Optional[str] = None,
+    ) -> RouterResult:
+        """
+        Ask FunctionGemma to validate + normalize a tool call the Reasoner chose.
+        Only call this when has_router() is True.
+        """
+        return self.client.validate_tool_call(
+            tool_name=tool_name,
+            params=params,
+            context_messages=context_messages,
+            tools=tools,
+            system_prompt=system_prompt,
+        )
+
     def fallback(
         self,
         prompt: str,
         tools: Optional[List[Dict[str, Any]]] = None,
         system_prompt: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Use fallback model (OpenAI) when local models fail or unavailable.
-        """
+        """Use fallback model (OpenAI) when local models fail or unavailable."""
         return self.client.call(
             prompt=prompt,
             model_type="fallback",
             tools=tools,
             system_prompt=system_prompt
         )
-    
+
     def __repr__(self) -> str:
-        return f"ModelLoader(endpoint={self.config.endpoint})"
+        mode = "two-model" if self._router_configured else "single-model"
+        return f"ModelLoader(endpoint={self.config.endpoint}, mode={mode})"
