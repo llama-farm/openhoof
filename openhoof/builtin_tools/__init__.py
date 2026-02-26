@@ -16,6 +16,7 @@ from .logging import log, read_logs
 from .state import save_state, load_state, list_state
 from .context import read_soul, read_user, read_agents, read_heartbeat, read_tool_guide
 from .mission import checkpoint, mission_start, mission_complete, get_context_stats, clear_history
+from .cli import run_command, read_file, write_file
 from .tool_schema import create_tool_schema
 
 # Export all built-in tools
@@ -51,6 +52,11 @@ __all__ = [
     "get_context_stats",
     "clear_history",
     
+    # CLI / file tools
+    "run_command",
+    "read_file",
+    "write_file",
+
     # Tool schema helper
     "create_tool_schema",
 ]
@@ -249,6 +255,104 @@ def get_builtin_tool_schemas():
                 }
             }
         },
+
+        # ── CLI / file tools ──────────────────────────────────────────────────
+        {
+            "type": "function",
+            "function": {
+                "name": "run_command",
+                "description": (
+                    "Run a CLI command and return stdout, stderr, and return code. "
+                    "Use for git, docker, kubectl, shell scripts, and any system command. "
+                    "Output is automatically truncated to protect token budget. "
+                    "Set shell=true for pipes and redirects (e.g. 'cat file | grep error')."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "cmd": {
+                            "type": "string",
+                            "description": "Command to run (e.g. 'git status', 'docker ps -a')"
+                        },
+                        "cwd": {
+                            "type": "string",
+                            "description": "Working directory (defaults to agent workspace)"
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "Max seconds to wait before timeout (default 30)",
+                            "default": 30
+                        },
+                        "shell": {
+                            "type": "boolean",
+                            "description": "Use shell mode for pipes/redirects. Default false (safer).",
+                            "default": False
+                        }
+                    },
+                    "required": ["cmd"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "description": (
+                    "Read a file's contents. Returns up to max_lines lines (default 200) "
+                    "to stay within token budget. Use offset for pagination through large files."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "File path (absolute or relative to workspace)"
+                        },
+                        "max_lines": {
+                            "type": "integer",
+                            "description": "Max lines to return (default 200)",
+                            "default": 200
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Start from this line number for pagination (default 0)",
+                            "default": 0
+                        }
+                    },
+                    "required": ["path"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "write_file",
+                "description": (
+                    "Write or append content to a file. "
+                    "Parent directories are created automatically. "
+                    "Use append=true to add to an existing file without overwriting."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "File path (absolute or relative to workspace)"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Content to write"
+                        },
+                        "append": {
+                            "type": "boolean",
+                            "description": "Append instead of overwrite (default false)",
+                            "default": False
+                        }
+                    },
+                    "required": ["path", "content"]
+                }
+            }
+        },
     ]
 
 
@@ -313,6 +417,14 @@ def builtin_executor(agent, tool_name: str, params: dict) -> dict:
         return get_context_stats(agent)
     elif tool_name == "clear_history":
         return clear_history(agent, **params)
-    
+
+    # CLI / file tools
+    elif tool_name == "run_command":
+        return run_command(agent, **params)
+    elif tool_name == "read_file":
+        return read_file(agent, **params)
+    elif tool_name == "write_file":
+        return write_file(agent, **params)
+
     else:
         return {"error": f"Unknown built-in tool: {tool_name}"}
