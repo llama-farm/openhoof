@@ -62,7 +62,8 @@ class Agent:
         llamafarm_config: Optional[str] = None,
         heartbeat_interval: float = 30.0,
         max_turns: int = 10,
-        workspace: Optional[str] = None
+        workspace: Optional[str] = None,
+        router_confidence_threshold: float = 0.85,
     ):
         """
         Initialize MicroClaw agent.
@@ -77,6 +78,12 @@ class Agent:
             heartbeat_interval: Seconds between heartbeats
             max_turns: Maximum reasoning turns (prevents infinite loops)
             workspace: Working directory (defaults to cwd)
+            router_confidence_threshold: Min router confidence to use its normalized params.
+                Resolution order (highest priority first):
+                  1. This param (explicit override)
+                  2. llamafarm.yaml → models.router.confidence_threshold
+                  3. Hard default: 0.85
+                Can also be changed at runtime: agent.router_confidence_threshold = 0.9
         """
         # Context files
         self.soul = soul if isinstance(soul, Soul) else Soul.from_file(soul)
@@ -116,15 +123,34 @@ class Agent:
         
         # Configuration
         self.max_turns = max_turns
-        
+
+        # Confidence threshold — resolution order:
+        #   1. Agent(router_confidence_threshold=X) param (explicit override)
+        #   2. llamafarm.yaml router.confidence_threshold
+        #   3. Hard default: 0.85
+        if router_confidence_threshold != 0.85:
+            # Explicit non-default passed in — use it
+            self.router_confidence_threshold = router_confidence_threshold
+        else:
+            # Use config value (may also be 0.85 if not set, that's fine)
+            self.router_confidence_threshold = getattr(
+                self.model_loader, "config_confidence_threshold", 0.85
+            )
+
         # Custom state (user can attach arbitrary data)
         self.custom: Dict[str, Any] = {}
         
+        router_status = (
+            f"two-model (threshold={self.router_confidence_threshold})"
+            if self.model_loader.has_router()
+            else "single-model"
+        )
         print("🐴 MicroClaw Agent initialized")
         print(f"   Soul: {self.soul.name} {self.soul.emoji}")
         print(f"   Memory: {self.memory}")
         print(f"   Tools: {len(self.tools)} registered")
         print(f"   Model: {self.model_loader}")
+        print(f"   Orchestration: {router_status}")
         print(f"   Heartbeat: every {heartbeat_interval}s")
         print(f"   Max turns: {max_turns}")
     
@@ -254,6 +280,93 @@ class Agent:
         
         return result
     
+    # ──────────────────────────────────────────────────────────────────────────
+    # Two-model orchestration helpers
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _has_router(self) -> bool:
+        """True if a separate router model (FunctionGemma) is configured."""
+        return self.model_loader.has_router()
+
+    def _strip_meta(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Strip internal metadata keys (_by, _confidence, _model) from messages
+        before sending to any LLM. Both models see clean OpenAI-format history.
+        """
+        return [
+            {k: v for k, v in msg.items() if not k.startswith("_")}
+            for msg in messages
+        ]
+
+    def _execute_with_router(
+        self,
+        tool_call: Dict[str, Any],
+        messages: List[Dict[str, Any]],
+    ) -> tuple:
+        """
+        Execute a tool call, optionally routing through FunctionGemma first.
+
+        Single-model mode:  Executes the tool directly with Reasoner's params.
+        Two-model mode:     Asks FunctionGemma to validate/normalize params first.
+                            High confidence → use FunctionGemma's normalized params.
+                            Low confidence  → fall back to Reasoner's params as-is.
+
+        Args:
+            tool_call: Tool call dict from Reasoner response
+            messages:  Full conversation history (for FunctionGemma context)
+
+        Returns:
+            (result_dict, confidence_or_None)
+            confidence is None in single-model mode (no router involved)
+        """
+        func = tool_call.get("function", {})
+        tool_name = func.get("name")
+        try:
+            params = json.loads(func.get("arguments", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            params = {}
+
+        # ── Single-model mode ─────────────────────────────────────────────────
+        if not self._has_router():
+            result = self.call_tool(tool_name, params)
+            return result, None
+
+        # ── Two-model mode: FunctionGemma validates/normalizes ────────────────
+        router_result = self.model_loader.validate_tool_call(
+            tool_name=tool_name,
+            params=params,
+            context_messages=self._strip_meta(messages[-3:]),
+            tools=self.tools.to_schema() if len(self.tools) > 0 else [],
+            system_prompt=self.soul.to_system_prompt(),
+        )
+
+        # Capture as training data: Reasoner's intent vs FunctionGemma's validation
+        self.training.capture(
+            tool_name=tool_name,
+            params=params,
+            result=router_result.to_dict(),
+            context=f"Router validation for {tool_name}",
+            system_prompt=self.soul.to_system_prompt(),
+        )
+
+        if router_result.confidence >= self.router_confidence_threshold:
+            # FunctionGemma validated — use its normalized params
+            print(
+                f"   🚀 Router: {tool_name} "
+                f"(confidence={router_result.confidence:.0%}, "
+                f"{'agreed' if router_result.agreed else 'NORMALIZED'})"
+            )
+            result = self.call_tool(router_result.tool_name, router_result.params)
+            return result, router_result.confidence
+        else:
+            # Low confidence — use Reasoner's params as-is
+            print(
+                f"   ↩️  Router low confidence ({router_result.confidence:.0%}) "
+                f"— using Reasoner params directly"
+            )
+            result = self.call_tool(tool_name, params)
+            return result, 0.0
+
     def reason(self, prompt: str, max_turns: Optional[int] = None) -> Dict[str, Any]:
         """
         Use reasoning model to process a prompt with autonomous tool calling.
@@ -266,69 +379,65 @@ class Agent:
         Returns:
             Final response dict with content
         """
-        # Get tool schemas for LlamaFarm
         tool_schemas = self.tools.to_schema() if len(self.tools) > 0 else None
         system_prompt = self.soul.to_system_prompt()
-        
-        # Use provided max_turns or fall back to agent default
         max_turns = max_turns if max_turns is not None else self.max_turns
-        
-        # Build conversation history
-        messages = [{"role": "user", "content": prompt}]
-        
-        turn = 0
-        while turn < max_turns:
-            turn += 1
-            print(f"\n🔄 Turn {turn}/{max_turns}")
-            
-            # Call reasoning model
+
+        # Shared message history — both models read from this.
+        # Internal metadata (_by, _confidence) stripped before each LLM call.
+        messages: List[Dict[str, Any]] = [{"role": "user", "content": prompt}]
+
+        mode = "two-model" if self._has_router() else "single-model"
+        print(f"\n🧠 Reasoning [{mode}] — max {max_turns} turns")
+
+        for turn in range(max_turns):
+            print(f"\n🔄 Turn {turn + 1}/{max_turns}")
+
+            # ── Step 1: Reasoner decides what to do next ──────────────────────
             response = self.model_loader.reason(
-                messages=messages,
+                messages=self._strip_meta(messages),
                 tools=tool_schemas,
-                system_prompt=system_prompt
+                system_prompt=system_prompt,
             )
-            
-            # Check if model wants to call tools
+
             tool_calls = response.get("tool_calls", [])
-            
+
             if not tool_calls:
-                # No more tool calls - we're done
-                print("✅ Agent complete (no more tool calls)")
+                # Reasoner is done — no more tool calls
+                print("✅ Agent complete")
                 return response
-            
-            # Execute all tool calls
-            print(f"🔧 Executing {len(tool_calls)} tool call(s)...")
-            
-            # Add assistant message with tool calls to history
+
+            # Record Reasoner's decision in shared history (with metadata)
             messages.append({
                 "role": "assistant",
                 "content": response.get("content", ""),
-                "tool_calls": tool_calls
+                "tool_calls": tool_calls,
+                "_by": "reasoner",
             })
-            
-            # Execute each tool and collect results
+
+            print(f"🔧 {len(tool_calls)} tool call(s) — "
+                  f"{'validating via router' if self._has_router() else 'executing directly'}")
+
+            # ── Step 2: Execute each tool (router validates if available) ──────
             for tool_call in tool_calls:
-                func = tool_call.get("function", {})
-                tool_name = func.get("name")
-                tool_params = json.loads(func.get("arguments", "{}"))
+                result, confidence = self._execute_with_router(tool_call, messages)
+
                 tool_call_id = tool_call.get("id", f"call_{turn}")
-                
-                # Execute tool
-                result = self.call_tool(tool_name, tool_params, context=prompt)
-                
-                # Add tool result to conversation
+                tool_name = tool_call.get("function", {}).get("name", "unknown")
+
+                # Record result in shared history (confidence metadata for training)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call_id,
                     "name": tool_name,
-                    "content": json.dumps(result)
+                    "content": json.dumps(result),
+                    **({"_confidence": confidence} if confidence is not None else {}),
                 })
-        
-        # Max turns reached
+
         print(f"⚠️ Max turns ({max_turns}) reached")
         return {
             "content": f"[Agent stopped after {max_turns} turns]",
-            "error": "max_turns_reached"
+            "error": "max_turns_reached",
         }
     
     def push_event(self, event_type: str, data: Dict[str, Any], priority: float = 0.5):
