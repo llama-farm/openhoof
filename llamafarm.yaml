@@ -13,6 +13,9 @@ models:
     model: "unsloth/functiongemma-270m-it-GGUF"
     temperature: 0.1
     max_tokens: 512
+    confidence_threshold: 0.85  # Min confidence to use router's normalized params
+                                 # 0.85 = require 85% certainty, else use Reasoner's params
+                                 # Lower = trust router more | Higher = trust Reasoner more
     purpose: "Tool routing only - maps user intent to tool calls"
     notes: "Fine-tuned on drone tools for <300ms routing"
   

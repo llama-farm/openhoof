@@ -98,13 +98,32 @@ def test_has_router_false_when_not_configured(agent_workspace):
 # ── router_confidence_threshold ───────────────────────────────────────────────
 
 def test_default_confidence_threshold(agent_workspace):
+    """Default threshold reads from llamafarm.yaml router.confidence_threshold (0.85)."""
     agent = make_agent(agent_workspace)
     assert agent.router_confidence_threshold == 0.85
 
 
-def test_custom_confidence_threshold(agent_workspace):
+def test_custom_confidence_threshold_via_param(agent_workspace):
+    """Explicit param overrides config default."""
     agent = make_agent(agent_workspace, threshold=0.70)
     assert agent.router_confidence_threshold == 0.70
+
+
+def test_confidence_threshold_runtime_override(agent_workspace):
+    """Threshold can be changed at runtime after init."""
+    agent = make_agent(agent_workspace, threshold=0.85)
+    assert agent.router_confidence_threshold == 0.85
+    agent.router_confidence_threshold = 0.60
+    assert agent.router_confidence_threshold == 0.60
+
+
+def test_confidence_threshold_boundary_values(agent_workspace):
+    """Threshold accepts 0.0 (always trust router) and 1.0 (never trust router)."""
+    a_low = make_agent(agent_workspace, threshold=0.0)
+    assert a_low.router_confidence_threshold == 0.0
+
+    a_high = make_agent(agent_workspace, threshold=1.0)
+    assert a_high.router_confidence_threshold == 1.0
 
 
 # ── _execute_with_router (single-model mode) ──────────────────────────────────

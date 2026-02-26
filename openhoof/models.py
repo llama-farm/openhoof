@@ -376,9 +376,14 @@ class ModelLoader:
         self.config = LlamaFarmConfig(config_path)
         self.client = LlamaFarmClient(self.config)
 
-        router_model = self.config.get_model_config("router").get("model", "")
+        router_cfg = self.config.get_model_config("router")
         reasoning_model = self.config.get_model_config("reasoning").get("model", "")
+        router_model = router_cfg.get("model", "")
         self._router_configured = bool(router_model and router_model != reasoning_model)
+        # Read threshold from config; Agent.__init__ param overrides this if provided
+        self.config_confidence_threshold: float = float(
+            router_cfg.get("confidence_threshold", 0.85)
+        )
 
         print("🦙 LlamaFarm initialized")
         print(f"   Endpoint: {self.config.endpoint}")

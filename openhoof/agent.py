@@ -78,6 +78,12 @@ class Agent:
             heartbeat_interval: Seconds between heartbeats
             max_turns: Maximum reasoning turns (prevents infinite loops)
             workspace: Working directory (defaults to cwd)
+            router_confidence_threshold: Min router confidence to use its normalized params.
+                Resolution order (highest priority first):
+                  1. This param (explicit override)
+                  2. llamafarm.yaml → models.router.confidence_threshold
+                  3. Hard default: 0.85
+                Can also be changed at runtime: agent.router_confidence_threshold = 0.9
         """
         # Context files
         self.soul = soul if isinstance(soul, Soul) else Soul.from_file(soul)
@@ -117,13 +123,25 @@ class Agent:
         
         # Configuration
         self.max_turns = max_turns
-        self.router_confidence_threshold = router_confidence_threshold
+
+        # Confidence threshold — resolution order:
+        #   1. Agent(router_confidence_threshold=X) param (explicit override)
+        #   2. llamafarm.yaml router.confidence_threshold
+        #   3. Hard default: 0.85
+        if router_confidence_threshold != 0.85:
+            # Explicit non-default passed in — use it
+            self.router_confidence_threshold = router_confidence_threshold
+        else:
+            # Use config value (may also be 0.85 if not set, that's fine)
+            self.router_confidence_threshold = getattr(
+                self.model_loader, "config_confidence_threshold", 0.85
+            )
 
         # Custom state (user can attach arbitrary data)
         self.custom: Dict[str, Any] = {}
         
         router_status = (
-            f"two-model (threshold={router_confidence_threshold})"
+            f"two-model (threshold={self.router_confidence_threshold})"
             if self.model_loader.has_router()
             else "single-model"
         )
