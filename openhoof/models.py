@@ -17,6 +17,7 @@ Two-model orchestration:
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -27,12 +28,13 @@ class RouterResult:
     """
     Result from the router model (FunctionGemma) validation step.
 
-    Confidence heuristic (Phase 1):
-    - FunctionGemma agrees on same tool → 0.95 (use its normalized params)
-    - FunctionGemma disagrees (different tool) → 0.2 (fall back to Reasoner)
-    - FunctionGemma returns no tool call → 0.0 (fall back to Reasoner)
-
-    Phase 2: Replace heuristic with real logprob-based confidence from model.
+    Confidence scoring (in priority order):
+    1. Logprobs (real)  — exp(logprob) of the tool-name token in the response.
+                          Requires LlamaFarm logprobs support. Most accurate.
+    2. Heuristic        — fallback when logprobs unavailable:
+                          agreed=True  → 0.95
+                          agreed=False → 0.2
+                          no tool call → 0.0
     """
     tool_name: str          # Tool FunctionGemma chose
     params: Dict[str, Any]  # Normalized/validated params
@@ -121,91 +123,145 @@ class LlamaFarmClient:
         model_type: str = "reasoning",
         tools: Optional[List[Dict[str, Any]]] = None,
         system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None
+        temperature: Optional[float] = None,
+        logprobs: bool = False,
+        top_logprobs: int = 5,
     ) -> Dict[str, Any]:
         """
         Call LlamaFarm with tools + system prompt passed through.
-        
+
         Args:
-            prompt: User message (simple mode) - mutually exclusive with messages
-            messages: Full conversation history (advanced mode)
-            model_type: "router" or "reasoning" or "mobile" or "fallback"
-            tools: OpenAI-format tool definitions (passed through)
-            system_prompt: System prompt (passed through)
-            temperature: Override default temperature
-        
+            prompt:        User message (simple mode)
+            messages:      Full conversation history (advanced mode)
+            model_type:    "router" | "reasoning" | "mobile" | "fallback"
+            tools:         OpenAI-format tool definitions
+            system_prompt: System prompt
+            temperature:   Override default temperature
+            logprobs:      Request log probabilities (for confidence scoring)
+            top_logprobs:  How many top token candidates to return per position
+
         Returns:
-            Response dict with content, tool_calls, etc.
+            Response dict with content, tool_calls, logprobs, etc.
         """
         model_config = self.config.get_model_config(model_type)
         model_name = model_config.get("model", "qwen2.5:8b")
         temp = temperature or model_config.get("temperature", 0.7)
         max_tokens = model_config.get("max_tokens", 2048)
-        
-        # Build OpenAI-compatible request
+
+        # Build messages
         if messages is None:
-            # Simple mode: build messages from prompt
             messages = []
-            
             if system_prompt:
-                messages.append({
-                    "role": "system",
-                    "content": system_prompt
-                })
-            
-            messages.append({
-                "role": "user",
-                "content": prompt
-            })
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
         else:
-            # Advanced mode: use provided messages
-            # Prepend system prompt if not already present
             if system_prompt and (not messages or messages[0].get("role") != "system"):
                 messages = [{"role": "system", "content": system_prompt}] + messages
-        
-        payload = {
+
+        payload: Dict[str, Any] = {
             "model": model_name,
             "messages": messages,
             "temperature": temp,
             "max_tokens": max_tokens,
         }
-        
-        # Pass tools through if provided
+
         if tools and self.config.tool_calling.get("pass_through", True):
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
-        
-        # Make API call
+
+        # Logprobs — only when explicitly requested (router validation calls)
+        if logprobs:
+            payload["logprobs"] = True
+            payload["top_logprobs"] = top_logprobs
+
         if not HAVE_REQUESTS:
             return self._mock_response(prompt, tools)
-        
+
         try:
             response = requests.post(
                 f"{self.endpoint}/chat/completions",
                 json=payload,
-                timeout=self.timeout
+                timeout=self.timeout,
             )
             response.raise_for_status()
             return self._parse_response(response.json())
-        
+
         except requests.RequestException as e:
             print(f"⚠️ LlamaFarm API error: {e}")
             return {"error": str(e), "mock": True}
     
     def _parse_response(self, response: Dict[str, Any]) -> Dict[str, Any]:
-        """Parse LlamaFarm response."""
+        """Parse LlamaFarm response, including logprobs when present."""
         if "choices" not in response:
             return {"error": "Invalid response format"}
-        
+
         choice = response["choices"][0]
         message = choice.get("message", {})
-        
+
         return {
             "content": message.get("content", ""),
             "tool_calls": message.get("tool_calls", []),
             "finish_reason": choice.get("finish_reason", "stop"),
             "usage": response.get("usage", {}),
+            # logprobs — present only when requested; None otherwise
+            "logprobs": choice.get("logprobs"),
         }
+
+    def _confidence_from_logprobs(
+        self,
+        logprobs_data: Optional[Dict[str, Any]],
+        tool_name: str,
+    ) -> Optional[float]:
+        """
+        Extract real confidence from logprobs for a specific tool name.
+
+        Searches the token stream for the tool name and converts the log
+        probability to a probability: confidence = exp(logprob).
+
+        Handles two common cases:
+        1. Tool name appears as a single token (e.g. "get_battery")
+        2. Tool name is split across tokens (e.g. "get" + "_battery") —
+           uses the first token's probability as a conservative estimate.
+
+        Returns:
+            float in [0, 1] if found, None if logprobs unavailable/unsupported.
+        """
+        if not logprobs_data:
+            return None
+
+        # Ollama/OpenAI format: logprobs.content is a list of token entries
+        content = logprobs_data.get("content") or []
+
+        for i, token_data in enumerate(content):
+            token = token_data.get("token", "")
+            logprob = token_data.get("logprob")
+
+            # Full match — tool name is one token
+            if tool_name in token and logprob is not None:
+                return round(math.exp(logprob), 4)
+
+            # Partial match — first token of a split tool name
+            # Check if remaining tokens spell out the rest
+            if tool_name.startswith(token.strip('"').strip()) and len(token.strip()) > 2:
+                # Collect following tokens to see if they complete the name
+                assembled = token.strip('"').strip()
+                for j in range(i + 1, min(i + 5, len(content))):
+                    assembled += content[j].get("token", "").strip('"')
+                    if tool_name in assembled:
+                        # Found it — use the first token's logprob
+                        if logprob is not None:
+                            return round(math.exp(logprob), 4)
+                        break
+
+        # Also check top_logprobs at each position for the tool name
+        for token_data in content:
+            for candidate in token_data.get("top_logprobs", []):
+                if tool_name in candidate.get("token", ""):
+                    lp = candidate.get("logprob")
+                    if lp is not None:
+                        return round(math.exp(lp), 4)
+
+        return None  # logprobs present but tool name not found in token stream
     
     def validate_tool_call(
         self,
@@ -232,17 +288,20 @@ class LlamaFarmClient:
         Returns:
             RouterResult with confidence score and normalized params
         """
+        # Request logprobs — real confidence scores when LlamaFarm supports them
         response = self.call(
             messages=context_messages,
             model_type="router",
             tools=tools,
             system_prompt=system_prompt,
+            logprobs=True,
+            top_logprobs=5,
         )
 
         tool_calls = response.get("tool_calls", [])
 
         if not tool_calls:
-            # Router returned no tool call → low confidence, use Reasoner's params
+            # Router returned no tool call → zero confidence
             return RouterResult(
                 tool_name=tool_name,
                 params=params,
@@ -261,11 +320,29 @@ class LlamaFarmClient:
 
         agreed = fg_name == tool_name
 
-        # Phase 1 confidence heuristic:
-        # - Same tool → 0.95 (FunctionGemma agrees, use its normalized params)
-        # - Different tool → 0.2 (FunctionGemma disagrees, fall through)
-        # Phase 2: use actual logprobs from model for real confidence scores
-        confidence = 0.95 if agreed else 0.2
+        # ── Confidence: real logprobs first, heuristic fallback ───────────────
+        #
+        # Real (logprobs available from LlamaFarm):
+        #   confidence = exp(logprob of tool-name token)  → true probability
+        #
+        # Heuristic fallback (logprobs not yet supported):
+        #   agreed  → 0.95   (FunctionGemma chose same tool, trust its params)
+        #   disagreed → 0.2  (FunctionGemma chose differently, low trust)
+        #
+        logprobs_data = response.get("logprobs")
+        real_confidence = self._confidence_from_logprobs(logprobs_data, fg_name)
+
+        if real_confidence is not None:
+            confidence = real_confidence
+            source = "logprobs"
+        else:
+            confidence = 0.95 if agreed else 0.2
+            source = "heuristic"
+
+        print(
+            f"   📊 Router confidence: {confidence:.0%} "
+            f"({'✅ agreed' if agreed else '⚠️ disagreed'}, source={source})"
+        )
 
         return RouterResult(
             tool_name=fg_name if agreed else tool_name,

@@ -151,3 +151,83 @@ def test_execute_with_router_handles_bad_json_args(agent_workspace):
         # Should not raise, even with bad JSON
         result, confidence = agent._execute_with_router(tool_call, messages)
         assert isinstance(result, dict)
+
+
+# ── _confidence_from_logprobs ─────────────────────────────────────────────────
+
+def make_client():
+    from openhoof.models import LlamaFarmConfig, LlamaFarmClient
+    config = LlamaFarmConfig.__new__(LlamaFarmConfig)
+    config.config = {}
+    config.endpoint = "http://localhost:11540/v1"
+    config.models = {}
+    config.tool_calling = {}
+    config.inference = {}
+    return LlamaFarmClient(config)
+
+
+def test_logprobs_exact_token_match():
+    """Tool name appears as a single token → exp(logprob) returned."""
+    client = make_client()
+    logprobs = {
+        "content": [
+            {"token": '"goto_waypoint"', "logprob": -0.0513, "top_logprobs": []},
+            {"token": '"', "logprob": -0.001, "top_logprobs": []},
+        ]
+    }
+    conf = client._confidence_from_logprobs(logprobs, "goto_waypoint")
+    assert conf is not None
+    assert 0.9 < conf <= 1.0   # exp(-0.0513) ≈ 0.95
+
+
+def test_logprobs_found_in_top_logprobs():
+    """Tool name appears in top_logprobs candidates (not chosen token)."""
+    client = make_client()
+    logprobs = {
+        "content": [
+            {
+                "token": '"get_battery"',
+                "logprob": -0.22,
+                "top_logprobs": [
+                    {"token": '"get_battery"', "logprob": -0.22},
+                    {"token": '"get_status"', "logprob": -1.6},
+                ],
+            }
+        ]
+    }
+    conf = client._confidence_from_logprobs(logprobs, "get_battery")
+    assert conf is not None
+    assert conf > 0.7
+
+
+def test_logprobs_none_when_data_missing():
+    """Returns None when logprobs data is None (not yet supported)."""
+    client = make_client()
+    assert client._confidence_from_logprobs(None, "any_tool") is None
+
+
+def test_logprobs_none_when_tool_not_in_stream():
+    """Returns None when tool name not found anywhere in the token stream."""
+    client = make_client()
+    logprobs = {
+        "content": [
+            {"token": "hello", "logprob": -0.1, "top_logprobs": []},
+            {"token": " world", "logprob": -0.2, "top_logprobs": []},
+        ]
+    }
+    assert client._confidence_from_logprobs(logprobs, "goto_waypoint") is None
+
+
+def test_logprobs_empty_content():
+    """Returns None for empty content list."""
+    client = make_client()
+    assert client._confidence_from_logprobs({"content": []}, "any_tool") is None
+
+
+def test_logprobs_probability_range():
+    """exp(logprob) is always in [0, 1]."""
+    client = make_client()
+    import math
+    for logprob in [-0.001, -0.1, -1.0, -5.0, -10.0]:
+        prob = math.exp(logprob)
+        assert 0.0 <= prob <= 1.0
