@@ -340,13 +340,17 @@ class Agent:
             system_prompt=self.soul.to_system_prompt(),
         )
 
-        # Capture as training data: Reasoner's intent vs FunctionGemma's validation
-        self.training.capture(
-            tool_name=tool_name,
-            params=params,
-            result=router_result.to_dict(),
-            context=f"Router validation for {tool_name}",
-            system_prompt=self.soul.to_system_prompt(),
+        # Capture router sample: single-turn intent → tool call (FunctionGemma format)
+        # Extract the user's immediate intent from the last user message
+        last_user_msg = next(
+            (m["content"] for m in reversed(messages) if m.get("role") == "user"), tool_name
+        )
+        self.training.capture_router(
+            user_intent=last_user_msg,
+            tool_name=router_result.tool_name if router_result.agreed else tool_name,
+            tool_params=router_result.params if router_result.agreed else params,
+            confidence=router_result.confidence,
+            agreed=router_result.agreed,
         )
 
         if router_result.confidence >= self.router_confidence_threshold:
@@ -403,8 +407,16 @@ class Agent:
             tool_calls = response.get("tool_calls", [])
 
             if not tool_calls:
-                # Reasoner is done — no more tool calls
+                # Reasoner is done — capture full chain as reasoner training sample
                 print("✅ Agent complete")
+                messages.append({
+                    "role": "assistant",
+                    "content": response.get("content", ""),
+                })
+                self.training.capture_reasoner(
+                    messages=self._strip_meta(messages),
+                    system_prompt=self.soul.to_system_prompt(),
+                )
                 return response
 
             # Record Reasoner's decision in shared history (with metadata)

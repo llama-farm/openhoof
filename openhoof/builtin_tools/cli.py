@@ -25,6 +25,34 @@ _MAX_OUTPUT = 4000
 _MAX_TAIL = 500
 
 
+def shell_exec(
+    agent,
+    cmd: str,
+    timeout: int = 30,
+    cwd: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Execute a shell command. Shell mode on by default — supports pipes, redirects, &&.
+
+    This is the simple version of run_command. Use it when you want to run a
+    one-liner without worrying about shell mode flags. Great for CLI fallbacks.
+
+    Examples:
+        shell_exec("git status && git log --oneline -5")
+        shell_exec("cat drone.log | grep ERROR | tail -20")
+        shell_exec("python3 scripts/preflight.py")
+
+    Args:
+        cmd:     Shell command string (pipes and redirects supported)
+        timeout: Max seconds to wait (default 30)
+        cwd:     Working directory (defaults to agent workspace)
+
+    Returns:
+        {"success": bool, "output": str, "error": str, "returncode": int}
+    """
+    return run_command(agent, cmd, cwd=cwd, timeout=timeout, shell=True)
+
+
 def run_command(
     agent,
     cmd: str,

@@ -200,3 +200,60 @@ def test_run_command_schema_has_required_fields():
     assert "timeout" in params["properties"]
     assert "shell" in params["properties"]
     assert "cwd" in params["properties"]
+
+
+# ── shell_exec ────────────────────────────────────────────────────────────────
+
+def test_shell_exec_basic(tmp_path):
+    from openhoof.builtin_tools.cli import shell_exec
+    agent = MockAgent(tmp_path)
+    result = shell_exec(agent, "echo hello")
+    assert result["success"] is True
+    assert "hello" in result["output"]
+
+
+def test_shell_exec_pipe(tmp_path):
+    from openhoof.builtin_tools.cli import shell_exec
+    agent = MockAgent(tmp_path)
+    result = shell_exec(agent, "echo 'hello world' | tr '[:lower:]' '[:upper:]'")
+    assert result["success"] is True
+    assert "HELLO" in result["output"]
+
+
+def test_shell_exec_in_schemas():
+    schemas = get_builtin_tool_schemas()
+    names = [s["function"]["name"] for s in schemas]
+    assert "shell_exec" in names
+
+
+# ── http_request ──────────────────────────────────────────────────────────────
+
+def test_http_request_in_schemas():
+    schemas = get_builtin_tool_schemas()
+    names = [s["function"]["name"] for s in schemas]
+    assert "http_request" in names
+
+
+def test_http_request_schema_required_fields():
+    from openhoof import get_builtin_tool_schemas
+    schemas = get_builtin_tool_schemas()
+    schema = next(s for s in schemas if s["function"]["name"] == "http_request")
+    assert "url" in schema["function"]["parameters"]["required"]
+    assert "method" in schema["function"]["parameters"]["properties"]
+    assert "body" in schema["function"]["parameters"]["properties"]
+
+
+def test_http_request_no_requests_lib(tmp_path, monkeypatch):
+    """Graceful error when requests is not installed."""
+    from openhoof.builtin_tools import http_tools
+    monkeypatch.setattr(http_tools, "HAVE_REQUESTS", False)
+    agent = MockAgent(tmp_path)
+    result = http_tools.http_request(agent, url="http://example.com")
+    assert result["success"] is False
+    assert "requests" in result["error"].lower()
+
+
+def test_http_request_total_schema_count():
+    """15 built-in schemas total (smoke test)."""
+    schemas = get_builtin_tool_schemas()
+    assert len(schemas) == 15
