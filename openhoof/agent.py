@@ -332,21 +332,31 @@ class Agent:
             return result, None
 
         # ── Two-model mode: FunctionGemma validates/normalizes ────────────────
+        #
+        # Step intent: extract from Reasoner's last assistant message (its thinking),
+        # NOT the original user task. Multi-step tasks need per-step intent.
+        #
+        # Priority: Reasoner's text content → tool name as fallback
+        step_intent = next(
+            (
+                m.get("content", "").strip()
+                for m in reversed(messages)
+                if m.get("role") == "assistant" and m.get("content", "").strip()
+                and not m.get("tool_calls")  # text-only assistant message = thinking
+            ),
+            f"Call {tool_name}",  # fallback: at least correct tool name
+        ) or f"Call {tool_name} with params: {params}"
+
         router_result = self.model_loader.validate_tool_call(
             tool_name=tool_name,
             params=params,
-            context_messages=self._strip_meta(messages[-3:]),
+            step_intent=step_intent,
             tools=self.tools.to_schema() if len(self.tools) > 0 else [],
-            system_prompt=self.soul.to_system_prompt(),
         )
 
         # Capture router sample: single-turn intent → tool call (FunctionGemma format)
-        # Extract the user's immediate intent from the last user message
-        last_user_msg = next(
-            (m["content"] for m in reversed(messages) if m.get("role") == "user"), tool_name
-        )
         self.training.capture_router(
-            user_intent=last_user_msg,
+            user_intent=step_intent,
             tool_name=router_result.tool_name if router_result.agreed else tool_name,
             tool_params=router_result.params if router_result.agreed else params,
             confidence=router_result.confidence,

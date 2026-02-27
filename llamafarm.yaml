@@ -16,6 +16,9 @@ models:
     confidence_threshold: 0.85  # Min confidence to use router's normalized params
                                  # 0.85 = require 85% certainty, else use Reasoner's params
                                  # Lower = trust router more | Higher = trust Reasoner more
+    # Router gets its own minimal system prompt — NOT the agent's SOUL.md.
+    # FunctionGemma is a 270M model. It only needs to know it routes tool calls.
+    system_prompt: "You are a function router. Given a request, select the correct tool and normalize its parameters. Return a single tool call only."
     purpose: "Tool routing only - maps user intent to tool calls"
     notes: "Fine-tuned on drone tools for <300ms routing"
   
