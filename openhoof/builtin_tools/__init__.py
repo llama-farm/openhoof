@@ -16,7 +16,8 @@ from .logging import log, read_logs
 from .state import save_state, load_state, list_state
 from .context import read_soul, read_user, read_agents, read_heartbeat, read_tool_guide
 from .mission import checkpoint, mission_start, mission_complete, get_context_stats, clear_history
-from .cli import run_command, read_file, write_file
+from .cli import shell_exec, run_command, read_file, write_file
+from .http_tools import http_request
 from .tool_schema import create_tool_schema
 
 # Export all built-in tools
@@ -52,10 +53,12 @@ __all__ = [
     "get_context_stats",
     "clear_history",
     
-    # CLI / file tools
+    # CLI / file / HTTP tools
+    "shell_exec",
     "run_command",
     "read_file",
     "write_file",
+    "http_request",
 
     # Tool schema helper
     "create_tool_schema",
@@ -256,7 +259,37 @@ def get_builtin_tool_schemas():
             }
         },
 
-        # ── CLI / file tools ──────────────────────────────────────────────────
+        # ── CLI / file / HTTP tools ───────────────────────────────────────────
+        {
+            "type": "function",
+            "function": {
+                "name": "shell_exec",
+                "description": (
+                    "Execute a shell command. Shell mode on by default — pipes and "
+                    "redirects work. Use for CLI tools, scripts, and drone CLI fallback. "
+                    "Examples: 'git status && git log -5', 'cat log | grep ERROR | tail -20'"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "cmd": {
+                            "type": "string",
+                            "description": "Shell command (pipes and && supported)"
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "Max seconds (default 30)",
+                            "default": 30
+                        },
+                        "cwd": {
+                            "type": "string",
+                            "description": "Working directory (defaults to agent workspace)"
+                        }
+                    },
+                    "required": ["cmd"]
+                }
+            }
+        },
         {
             "type": "function",
             "function": {
@@ -353,6 +386,50 @@ def get_builtin_tool_schemas():
                 }
             }
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "http_request",
+                "description": (
+                    "Make an HTTP request (GET, POST, PUT, DELETE). "
+                    "Use for direct API calls — drone HTTP API, REST services, webhooks, "
+                    "gateway sync. Returns parsed JSON when possible."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "Full URL (e.g. 'http://drone.local/api/status')"
+                        },
+                        "method": {
+                            "type": "string",
+                            "description": "HTTP method",
+                            "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+                            "default": "GET"
+                        },
+                        "body": {
+                            "type": "object",
+                            "description": "Request body (sent as JSON)"
+                        },
+                        "headers": {
+                            "type": "object",
+                            "description": "Additional HTTP headers"
+                        },
+                        "params": {
+                            "type": "object",
+                            "description": "URL query parameters"
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "Max seconds to wait (default 30)",
+                            "default": 30
+                        }
+                    },
+                    "required": ["url"]
+                }
+            }
+        },
     ]
 
 
@@ -418,13 +495,17 @@ def builtin_executor(agent, tool_name: str, params: dict) -> dict:
     elif tool_name == "clear_history":
         return clear_history(agent, **params)
 
-    # CLI / file tools
+    # CLI / file / HTTP tools
+    elif tool_name == "shell_exec":
+        return shell_exec(agent, **params)
     elif tool_name == "run_command":
         return run_command(agent, **params)
     elif tool_name == "read_file":
         return read_file(agent, **params)
     elif tool_name == "write_file":
         return write_file(agent, **params)
+    elif tool_name == "http_request":
+        return http_request(agent, **params)
 
     else:
         return {"error": f"Unknown built-in tool: {tool_name}"}
