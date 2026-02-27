@@ -267,7 +267,7 @@ class LlamaFarmClient:
         self,
         tool_name: str,
         params: Dict[str, Any],
-        context_messages: List[Dict[str, Any]],
+        step_intent: str,
         tools: List[Dict[str, Any]],
         system_prompt: Optional[str] = None,
     ) -> "RouterResult":
@@ -278,19 +278,26 @@ class LlamaFarmClient:
         is to validate the params are correct and normalize any ambiguous values
         (e.g., "fly north 200m" → {"bearing": 0, "distance": 200, "unit": "meters"}).
 
+        FunctionGemma gets ONLY the current step intent — not the full conversation
+        history. It's a 270M model; prior history wastes tokens and confuses it.
+
         Args:
-            tool_name: Tool the Reasoner decided to call
-            params: Params the Reasoner provided
-            context_messages: Recent conversation (last 3 messages for context)
-            tools: All available tool schemas
-            system_prompt: Optional system prompt
+            tool_name:   Tool the Reasoner decided to call
+            params:      Params the Reasoner provided
+            step_intent: The immediate intent for THIS step (not the original
+                         user task). Extracted from Reasoner's thinking.
+            tools:       All available tool schemas
+            system_prompt: Router-specific system prompt (NOT SOUL.md)
 
         Returns:
             RouterResult with confidence score and normalized params
         """
+        # Send only the current step — not full conversation history
+        focused_messages = [{"role": "user", "content": step_intent}]
+
         # Request logprobs — real confidence scores when LlamaFarm supports them
         response = self.call(
-            messages=context_messages,
+            messages=focused_messages,
             model_type="router",
             tools=tools,
             system_prompt=system_prompt,
@@ -384,6 +391,11 @@ class ModelLoader:
         self.config_confidence_threshold: float = float(
             router_cfg.get("confidence_threshold", 0.85)
         )
+        # Router-specific system prompt — NOT the agent's SOUL.md
+        self.router_system_prompt: str = router_cfg.get(
+            "system_prompt",
+            "You are a function router. Select the correct tool and normalize its parameters. Return a single tool call."
+        )
 
         print("🦙 LlamaFarm initialized")
         print(f"   Endpoint: {self.config.endpoint}")
@@ -443,20 +455,22 @@ class ModelLoader:
         self,
         tool_name: str,
         params: Dict[str, Any],
-        context_messages: List[Dict[str, Any]],
+        step_intent: str,
         tools: List[Dict[str, Any]],
-        system_prompt: Optional[str] = None,
     ) -> RouterResult:
         """
         Ask FunctionGemma to validate + normalize a tool call the Reasoner chose.
         Only call this when has_router() is True.
+
+        Uses the router-specific system prompt from llamafarm.yaml — NOT SOUL.md.
+        FunctionGemma only sees the current step, not the full conversation history.
         """
         return self.client.validate_tool_call(
             tool_name=tool_name,
             params=params,
-            context_messages=context_messages,
+            step_intent=step_intent,
             tools=tools,
-            system_prompt=system_prompt,
+            system_prompt=self.router_system_prompt,
         )
 
     def fallback(
