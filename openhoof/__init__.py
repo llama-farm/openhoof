@@ -55,6 +55,16 @@ from .finetune import (
     ReasonerDatasetBuilder,
 )
 
+# Synthetic data generation
+from .synth import (
+    SyntheticDataGenerator,
+    SchemaValidator,
+    TeacherModel,
+    RouterExampleGenerator,
+    ReasonerExampleGenerator,
+    GenerationStats,
+)
+
 # Tool system (OpenAI-compatible schemas)
 from .tools.base import Tool, ToolContext, ToolResult
 from .tools.registry import ToolRegistry
@@ -98,6 +108,14 @@ __all__ = [
     "JobStatus",
     "RouterDatasetBuilder",
     "ReasonerDatasetBuilder",
+
+    # Synthetic data
+    "SyntheticDataGenerator",
+    "SchemaValidator",
+    "TeacherModel",
+    "RouterExampleGenerator",
+    "ReasonerExampleGenerator",
+    "GenerationStats",
 
     # Tool system
     "Tool",
