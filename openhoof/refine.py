@@ -298,6 +298,13 @@ class RefinementLoop:
 
         model = model_override or (f"ft:{job_id}" if job_id else self.model)
 
+        # Resolve ft: alias to direct GGUF path to avoid UR crashes on model swap
+        if model and model.startswith("ft:"):
+            _jid = model[3:]
+            _gguf = Path.home() / f".llamafarm/models/llm/{_jid}/gguf/model-q8_0.gguf"
+            if _gguf.exists():
+                model = str(_gguf)
+
         examples = []
         with open(eval_path) as f:
             for line in f:

@@ -1,360 +1,209 @@
 """
-HTTP clients for Cradlepoint R980 and Netgear GS105Ev2.
+Tool executor for Cradlepoint R980 + Netgear GS105Ev2.
 
-These handle all auth, session management, rate limiting, and response parsing.
-The FunctionGemma model never sees any of this — it just picks tool names and params.
+Uses the chud dashboard proxy (C binary, webhook server) instead of calling
+router/switch APIs directly. chud handles all auth, CSRF, rate limiting,
+MD5 challenge-response, and session management.
+
+chud endpoints used:
+  GET  /api/status          — bulk fetch all 25 router config+status sections
+  POST /api/config          — patch any router config section
+  GET  /api/logs            — router system log
+  POST /api/switch/ports    — switch port status
+  POST /api/switch/vlan     — switch VLAN config/mutation
+  POST /api/switch/pvid     — switch port PVID
+  POST /api/switch/login    — force re-auth (rare)
+  POST /api/provision/move  — move device to VLAN
+
+FunctionGemma routes to tool names. This class executes the calls.
+The model never sees chud, auth, or HTTP — just tool_name(params).
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
-import re
-import time
-import urllib.parse
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 
-# ── Cradlepoint R980 ──────────────────────────────────────────────────────────
-
-class CradlepointSession:
+class ChudClient:
     """
-    Authenticated session for the Cradlepoint R980 HTTPS API.
+    Thin HTTP client for the chud dashboard proxy.
 
-    Auth: form-based login (NEVER use HTTP Basic — triggers PCI-DSS lockout).
-    State: maintains session cookies + XSRF token automatically.
-    Rate limiting: enforces per-operation intervals from the API reference.
+    chud runs as a local C binary (webhook server) that proxies to the
+    Cradlepoint router and Netgear switch, handling all auth internally.
     """
 
-    # Rate limits from API reference (ms between calls)
-    _GET_INTERVAL    = 0.25   # 250ms between GETs
-    _MUTATE_INTERVAL = 0.50   # 500ms between PUT/POST/DELETE
-    _POST_DEL_COOLDOWN = 1.0  # 1s cooldown after POST/DELETE (array restructuring)
-
-    def __init__(self, host: str, username: str, password: str, verify_ssl: bool = False):
+    def __init__(self, base_url: str = "http://localhost:8080"):
         import requests
-        self.base = f"https://{host}"
-        self.username = username
-        self.password = password
-        self.verify_ssl = verify_ssl
+        self.base = base_url.rstrip("/")
         self._session = requests.Session()
-        self._session.verify = verify_ssl
-        self._xsrf: Optional[str] = None
-        self._authenticated = False
-        self._last_call = 0.0
+        # Cache full status to avoid repeated bulk fetches within a request
+        self._status_cache: Optional[Dict] = None
 
-    def login(self) -> None:
-        """Form-based login. Sets session cookies and XSRF token."""
-        # POST to login endpoint
-        encoded_pass = urllib.parse.quote(self.password, safe="")
-        self._session.post(
-            f"{self.base}/login/",
-            data=f"cprouterusername={self.username}&cprouterpassword={encoded_pass}",
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            allow_redirects=True,
-        )
-        # Follow redirect to /admin/ to get _xsrf cookie
-        self._session.get(f"{self.base}/admin/")
-        xsrf = self._session.cookies.get("_xsrf")
-        if not xsrf:
-            raise RuntimeError("Login failed — no _xsrf cookie received")
-        self._xsrf = xsrf
-        self._authenticated = True
+    def _get(self, path: str) -> Any:
+        r = self._session.get(f"{self.base}/{path.lstrip('/')}", timeout=15)
+        r.raise_for_status()
+        return r.json()
 
-    def _ensure_auth(self) -> None:
-        if not self._authenticated:
-            self.login()
-
-    def _rate_limit(self, interval: float) -> None:
-        elapsed = time.time() - self._last_call
-        if elapsed < interval:
-            time.sleep(interval - elapsed)
-        self._last_call = time.time()
-
-    def _headers(self) -> Dict[str, str]:
-        return {
-            "X-Requested-With": "XMLHttpRequest",
-            "X-CSRFToken": self._xsrf or "",
-        }
-
-    def _check(self, resp) -> Any:
-        """Parse response envelope. Re-auth on 302, raise on success=false."""
-        if resp.status_code == 302 or "/login/" in resp.url:
-            self._authenticated = False
-            raise RuntimeError("Session expired — re-login required")
-        data = resp.json()
-        if not data.get("success"):
-            raise RuntimeError(f"API error: {data.get('data', data)}")
-        return data.get("data")
-
-    def get(self, path: str) -> Any:
-        self._ensure_auth()
-        self._rate_limit(self._GET_INTERVAL)
-        r = self._session.get(
-            f"{self.base}/api/{path.lstrip('/')}",
-            headers=self._headers(),
-        )
-        return self._check(r)
-
-    def put(self, path: str, data: Dict) -> Any:
-        self._ensure_auth()
-        self._rate_limit(self._MUTATE_INTERVAL)
-        encoded = urllib.parse.urlencode({"data": json.dumps(data)})
-        r = self._session.put(
-            f"{self.base}/api/{path.lstrip('/')}",
-            data=encoded,
-            headers={
-                **self._headers(),
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            },
-        )
-        return self._check(r)
-
-    def post(self, path: str, data: Dict) -> Any:
-        self._ensure_auth()
-        self._rate_limit(self._MUTATE_INTERVAL)
-        encoded = urllib.parse.urlencode({"data": json.dumps(data)})
+    def _post(self, path: str, body: Dict) -> Any:
         r = self._session.post(
-            f"{self.base}/api/{path.lstrip('/')}",
-            data=encoded,
-            headers={
-                **self._headers(),
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            },
+            f"{self.base}/{path.lstrip('/')}",
+            json=body,
+            timeout=15,
         )
-        result = self._check(r)
-        time.sleep(self._POST_DEL_COOLDOWN)  # array restructuring cooldown
-        return result
-
-    def delete(self, path: str) -> Any:
-        self._ensure_auth()
-        self._rate_limit(self._MUTATE_INTERVAL)
-        r = self._session.delete(
-            f"{self.base}/api/{path.lstrip('/')}",
-            headers=self._headers(),
-        )
-        result = self._check(r)
-        time.sleep(self._POST_DEL_COOLDOWN)
-        return result
-
-
-# ── Netgear GS105Ev2 ──────────────────────────────────────────────────────────
-
-class NetgearSession:
-    """
-    Authenticated session for the Netgear GS105Ev2 HTTP CGI API (Tier 3).
-
-    Auth: MD5 challenge-response (interleaved password + nonce).
-    CSRF: hash token required in all config POSTs; rotates every response.
-    Session limit: 1 concurrent session — logs out any stale session first.
-    Rate limiting: 750ms between CGI calls; 3-5s after provisioning ops.
-    """
-
-    _CALL_INTERVAL    = 0.75   # 750ms between CGI calls
-    _PROVISION_COOLDOWN = 4.0  # 4s after provisioning ops
-
-    def __init__(self, host: str, password: str):
-        import requests
-        self.base = f"http://{host}"
-        self.password = password[:20]  # switch truncates to 20 chars
-        self._session = requests.Session()
-        self._hash: Optional[str] = None
-        self._authenticated = False
-        self._last_call = 0.0
-
-    def login(self) -> None:
-        """MD5 challenge-response login."""
-        # Clear any stale session
+        r.raise_for_status()
         try:
-            self._session.get(f"{self.base}/logout.cgi", timeout=5)
+            return r.json()
         except Exception:
-            pass
+            return {"success": True, "raw": r.text}
 
-        # Get nonce
-        r = self._session.get(f"{self.base}/login.cgi")
-        m = re.search(r'id="rand"[^>]*value="([^"]+)"', r.text)
-        if not m:
-            raise RuntimeError("Could not extract nonce from login page")
-        rand = m.group(1)
+    # ── Router bulk status ────────────────────────────────────────────────────
 
-        # Compute MD5(interleave(password, rand))
-        merged = self._interleave(self.password, rand)
-        md5_hash = hashlib.md5(merged.encode()).hexdigest()
+    def get_all_status(self, fresh: bool = False) -> Dict:
+        """GET /api/status — returns all 25 router config+status sections."""
+        if self._status_cache is None or fresh:
+            self._status_cache = self._get("api/status")
+        return self._status_cache
 
-        # Submit
-        r = self._session.post(
-            f"{self.base}/login.cgi",
-            data=f"password={md5_hash}",
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Referer": f"{self.base}/login.cgi",
-            },
-        )
-        if "SID" not in self._session.cookies:
-            raise RuntimeError("Switch login failed — no SID cookie")
-        self._authenticated = True
+    def get_section(self, section: str, fresh: bool = False) -> Any:
+        """Pull one section from the bulk status response."""
+        data = self.get_all_status(fresh=fresh)
+        return data.get(section, data)
 
-        # Get initial hash token
-        self._refresh_hash()
+    # ── Router config mutations ───────────────────────────────────────────────
 
-    @staticmethod
-    def _interleave(password: str, rand: str) -> str:
-        result = ""
-        i1 = i2 = 0
-        while i1 < len(password) or i2 < len(rand):
-            if i1 < len(password):
-                result += password[i1]; i1 += 1
-            if i2 < len(rand):
-                result += rand[i2]; i2 += 1
-        return result
+    def config_patch(self, section: str, data: Dict, method: str = "PUT") -> Any:
+        """POST /api/config — patch a router config section."""
+        self._status_cache = None  # invalidate cache on mutation
+        return self._post("api/config", {
+            "section": section,
+            "data": json.dumps(data),
+            "method": method,
+        })
 
-    def _refresh_hash(self) -> None:
-        """Fetch the current CSRF hash token from a config page."""
-        r = self._session.get(
-            f"{self.base}/8021qCf.cgi",
-            headers={"Referer": f"{self.base}/index.cgi"},
-        )
-        m = re.search(r'id="hash"[^>]*value="([^"]+)"', r.text)
-        if m:
-            self._hash = m.group(1)
+    def config_post(self, section: str, data: Dict) -> Any:
+        return self.config_patch(section, data, method="POST")
 
-    def _ensure_auth(self) -> None:
-        if not self._authenticated:
-            self.login()
+    def config_delete(self, section: str, data: Dict) -> Any:
+        return self.config_patch(section, data, method="DELETE")
 
-    def _rate_limit(self) -> None:
-        elapsed = time.time() - self._last_call
-        if elapsed < self._CALL_INTERVAL:
-            time.sleep(self._CALL_INTERVAL - elapsed)
-        self._last_call = time.time()
+    # ── Router logs ───────────────────────────────────────────────────────────
 
-    def _referer_headers(self) -> Dict[str, str]:
-        return {"Referer": f"{self.base}/index.cgi"}
+    def get_logs(self) -> Any:
+        """GET /api/logs — router system log."""
+        return self._get("api/logs")
 
-    def _extract_hash(self, html: str) -> Optional[str]:
-        m = re.search(r'id="hash"[^>]*value="([^"]+)"', html)
-        return m.group(1) if m else None
+    # ── Switch proxies ────────────────────────────────────────────────────────
 
-    def get(self, path: str) -> str:
-        """GET a CGI endpoint. Returns raw HTML (caller parses as needed)."""
-        self._ensure_auth()
-        self._rate_limit()
-        r = self._session.get(
-            f"{self.base}/{path.lstrip('/')}",
-            headers=self._referer_headers(),
-        )
-        # Update hash from response
-        new_hash = self._extract_hash(r.text)
-        if new_hash:
-            self._hash = new_hash
-        return r.text
+    def switch_ports(self) -> Any:
+        """GET /api/switch/ports — switch port status."""
+        return self._get("api/switch/ports")
 
-    def post(self, path: str, data: Dict[str, Any], provision: bool = False) -> str:
-        """POST to a CGI endpoint with CSRF hash. Returns raw HTML response."""
-        self._ensure_auth()
-        self._rate_limit()
-        post_data = {**data, "hash": self._hash}
-        r = self._session.post(
-            f"{self.base}/{path.lstrip('/')}",
-            data=post_data,
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                **self._referer_headers(),
-            },
-        )
-        new_hash = self._extract_hash(r.text)
-        if new_hash:
-            self._hash = new_hash
-        if provision:
-            time.sleep(self._PROVISION_COOLDOWN)
-        return r.text
+    def switch_vlan(self, body: Dict) -> Any:
+        """POST /api/switch/vlan — configure switch VLANs."""
+        return self._post("api/switch/vlan", body)
+
+    def switch_pvid(self, port: int, vid: int) -> Any:
+        """POST /api/switch/pvid — set port PVID."""
+        return self._post("api/switch/pvid", {"port": port, "vid": vid})
+
+    def switch_debug(self) -> Any:
+        return self._get("api/switch/debug")
+
+    # ── Provisioning ──────────────────────────────────────────────────────────
+
+    def provision(self, body: Dict = {}) -> Any:
+        return self._post("api/provision", body)
+
+    def provision_move(self, body: Dict) -> Any:
+        return self._post("api/provision/move", body)
 
 
 # ── Tool executor ─────────────────────────────────────────────────────────────
 
 class NetworkToolExecutor:
     """
-    Executes tool calls against the real Cradlepoint + Netgear APIs.
+    Executes FunctionGemma tool calls via the chud dashboard proxy.
 
-    FunctionGemma returns tool_name(params) → this class runs the actual HTTP calls.
-    Session state (auth, cookies, CSRF) is managed here, not by the model.
+    FunctionGemma returns tool_name(params) → this class maps that to a
+    chud API call. All auth, session management, and device complexity is
+    handled by chud, not here.
+
+    chud's /api/status returns all 25 sections at once. Status tools
+    call get_all_status() once and pluck the relevant section — this is
+    faster than 12 individual API calls while keeping tool granularity
+    fine enough for FunctionGemma to route accurately.
     """
 
-    def __init__(
-        self,
-        router: Optional[CradlepointSession] = None,
-        switch: Optional[NetgearSession] = None,
-    ):
-        self.router = router
-        self.switch = switch
+    def __init__(self, chud_url: str = "http://localhost:8080"):
+        self.chud = ChudClient(base_url=chud_url)
 
     def execute(self, tool_name: str, params: Dict[str, Any]) -> Any:
-        """Dispatch a tool call to the appropriate API handler."""
+        """Dispatch a tool call to the appropriate chud handler."""
         handler = getattr(self, f"_tool_{tool_name}", None)
         if not handler:
             return {"error": f"Unknown tool: {tool_name}"}
         try:
             return handler(**params)
-        except RuntimeError as e:
+        except Exception as e:
             return {"error": str(e)}
 
-    # ── Router status tools ───────────────────────────────────────────────────
+    # ── Router status tools — all via /api/status bulk fetch ─────────────────
 
     def _tool_router_get_lan_clients(self) -> Any:
-        return self.router.get("status/lan/clients/")
+        return self.chud.get_section("lan/clients")
 
     def _tool_router_get_lan_networks(self) -> Any:
-        return self.router.get("config/lan/")
+        return self.chud.get_section("lan")
 
     def _tool_router_get_wan_status(self) -> Any:
+        status = self.chud.get_all_status()
         return {
-            "connection_state": self.router.get("status/wan/connection_state/"),
-            "ipinfo": self.router.get("status/wan/ipinfo/"),
-            "primary_device": self.router.get("status/wan/primary_device/"),
+            "connection_state": status.get("wan/connection_state"),
+            "ipinfo":           status.get("wan/ipinfo"),
+            "primary_device":   status.get("wan/primary_device"),
         }
 
     def _tool_router_get_system_status(self) -> Any:
-        return self.router.get("status/system/")
+        return self.chud.get_section("system")
 
     def _tool_router_get_system_config(self) -> Any:
-        return self.router.get("config/system/")
+        return self.chud.get_section("config/system")
 
     def _tool_router_get_dhcp_leases(self) -> Any:
-        return self.router.get("status/dhcpd/leases/")
+        return self.chud.get_section("dhcpd/leases")
 
     def _tool_router_get_routing_table(self) -> Any:
-        return self.router.get("status/routing/table/")
+        return self.chud.get_section("routing/table")
 
     def _tool_router_get_firewall_config(self) -> Any:
-        return self.router.get("config/firewall/")
+        return self.chud.get_section("firewall")
 
     def _tool_router_get_wifi_config(self) -> Any:
-        return self.router.get("config/wlan/")
+        return self.chud.get_section("wlan")
 
     def _tool_router_get_vlan_config(self) -> Any:
-        return self.router.get("config/vlan/")
+        return self.chud.get_section("vlan")
 
     def _tool_router_get_lldp_neighbors(self) -> Any:
-        return self.router.get("status/lldp/")
+        return self.chud.get_section("lldp")
 
     def _tool_router_get_logs(self, level: str = "info") -> Any:
-        entries = self.router.get("status/log/")
+        entries = self.chud.get_logs()
         level_order = ["debug", "info", "warning", "error", "critical"]
         min_idx = level_order.index(level) if level in level_order else 1
-        return [
-            e for e in entries
-            if isinstance(e, list) and len(e) > 1
-            and level_order.index(e[1]) >= min_idx
-            if e[1] in level_order
-        ]
+        if isinstance(entries, list):
+            return [e for e in entries if isinstance(e, list) and len(e) > 1
+                    and e[1] in level_order and level_order.index(e[1]) >= min_idx]
+        return entries
 
-    # ── Router config mutation tools ──────────────────────────────────────────
+    # ── Router config mutation tools — all via /api/config POST ───────────────
 
     def _tool_router_create_vlan(self, vid: int, uid: str, mode: str = "lan") -> Any:
-        return self.router.post("config/vlan/", {"vid": vid, "uid": uid, "mode": mode})
+        return self.chud.config_post("vlan", {"vid": vid, "uid": uid, "mode": mode})
 
     def _tool_router_delete_vlan(self, idx: int) -> Any:
-        return self.router.delete(f"config/vlan/{idx}/")
+        return self.chud.config_delete(f"vlan/{idx}", {})
 
     def _tool_router_update_lan(self, idx: int, **kwargs) -> Any:
         update: Dict[str, Any] = {}
@@ -369,138 +218,63 @@ class NetworkToolExecutor:
             if "dhcp_end" in kwargs:
                 dhcpd["range_end"] = kwargs["dhcp_end"]
             update["dhcpd"] = dhcpd
-        return self.router.put(f"config/lan/{idx}/", update)
+        return self.chud.config_patch(f"lan/{idx}", update)
 
     def _tool_router_update_wifi_ssid(
         self, radio_idx: int, bss_idx: int, **kwargs
     ) -> Any:
         update = {k: v for k, v in kwargs.items()
                   if k in ("ssid", "wpapsk", "hidden", "enabled", "authmode")}
-        return self.router.put(f"config/wlan/radio/{radio_idx}/bss/{bss_idx}/", update)
+        return self.chud.config_patch(f"wlan/radio/{radio_idx}/bss/{bss_idx}", update)
 
     def _tool_router_update_firewall(self, **kwargs) -> Any:
         update = {k: v for k, v in kwargs.items()
                   if k in ("wan_ping", "anti_spoof")}
-        return self.router.put("config/firewall/", update)
+        return self.chud.config_patch("firewall", update)
 
     def _tool_router_reboot(self) -> Any:
-        return self.router.put("control/system/reboot", {})
+        return self.chud.config_patch("system/reboot", {})
 
     def _tool_router_add_static_route(
         self, ip_network: str, gateway: str, metric: int = 0
     ) -> Any:
-        # Find the main routing table index
-        tables = self.router.get("config/routing/tables/")
-        main_idx = next(
-            (i for i, t in enumerate(tables) if t.get("name") == "main"), 0
-        )
-        return self.router.post(
-            f"config/routing/tables/{main_idx}/routes/",
+        return self.chud.config_post(
+            "routing/tables/0/routes",
             {"ip_network": ip_network, "gw": gateway, "metric": metric},
         )
 
     def _tool_router_add_dns_host(self, hostname: str, ip_address: str) -> Any:
-        return self.router.post("config/dns/hosts/", {"hostname": hostname, "ip_address": ip_address})
+        return self.chud.config_post("dns/hosts", {"hostname": hostname, "ip_address": ip_address})
 
-    # ── Switch tools ──────────────────────────────────────────────────────────
+    # ── Switch tools — all via /api/switch/* ──────────────────────────────────
 
     def _tool_switch_get_port_status(self) -> Any:
-        html = self.switch.get("status.cgi")
-        # Parse port link state from HTML table
-        ports = []
-        for m in re.finditer(
-            r'<tr class="portID">(.*?)</tr>', html, re.DOTALL
-        ):
-            row = m.group(1)
-            vals = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL)
-            if len(vals) >= 3:
-                ports.append({
-                    "port": len(ports) + 1,
-                    "link": vals[0].strip(),
-                    "speed": vals[1].strip() if len(vals) > 1 else "",
-                })
-        return ports
+        return self.chud.switch_ports()
 
     def _tool_switch_get_vlan_config(self) -> Any:
-        html = self.switch.get("8021qCf.cgi")
-        vlans = []
-        for m in re.finditer(r'vlanck\d+.*?value="(\d+)"', html):
-            vlans.append({"vid": int(m.group(1))})
-        return vlans
+        return self.chud.switch_vlan({"action": "list"})
 
     def _tool_switch_create_vlan(self, vid: int) -> Any:
-        self.switch.post("8021qCf.cgi", {
-            "ACTION": "Add",
-            "ADD_VLANID": str(vid),
-            "status": "Enable",
-        }, provision=True)
-        return {"success": True, "vid": vid}
+        return self.chud.switch_vlan({"action": "create", "vid": vid})
 
     def _tool_switch_delete_vlan(self, vid: int) -> Any:
-        # Get sorted VLAN list to find index
-        html = self.switch.get("8021qCf.cgi")
-        vids = [int(m.group(1)) for m in re.finditer(r'value="(\d+)".*?vlan', html)]
-        vids_sorted = sorted(set(vids))
-        if vid not in vids_sorted:
-            return {"error": f"VLAN {vid} not found"}
-        idx = vids_sorted.index(vid)
-        self.switch.post("8021qCf.cgi", {
-            "ACTION": "Delete",
-            f"vlanck{idx}": str(vid),
-            "status": "Enable",
-        }, provision=True)
-        return {"success": True, "vid": vid}
+        return self.chud.switch_vlan({"action": "delete", "vid": vid})
 
     def _tool_switch_set_vlan_membership(self, vid: int, port_config: str) -> Any:
-        # Step 1: Switch to target VLAN
-        r1 = self.switch.post("8021qMembe.cgi", {"VLAN_ID": str(vid)})
-        new_hash = re.search(r'id="hash"[^>]*value="([^"]+)"', r1)
-        # Step 2: Save membership (hash auto-updated in session)
-        self.switch.post("8021qMembe.cgi", {
-            "VLAN_ID": str(vid),
-            "VLAN_ID_HD": str(vid),
-            "hiddenMem": port_config,
-        }, provision=True)
-        return {"success": True, "vid": vid, "port_config": port_config}
+        return self.chud.switch_vlan({
+            "action":      "membership",
+            "vid":         vid,
+            "port_config": port_config,
+        })
 
     def _tool_switch_set_port_pvid(self, port: int, vid: int) -> Any:
-        # port is 1-indexed to the user, 0-indexed in API
-        self.switch.post("portPVID.cgi", {
-            f"port{port - 1}": "checked",
-            "pvid": str(vid),
-        })
-        return {"success": True, "port": port, "pvid": vid}
+        return self.chud.switch_pvid(port=port, vid=vid)
 
     def _tool_switch_get_port_stats(self) -> Any:
-        html = self.switch.get("portStatistics.cgi")
-        stats = []
-        for i, m in enumerate(re.finditer(
-            r'<tr class="portID">(.*?)</tr>', html, re.DOTALL
-        )):
-            vals = re.findall(r'<input[^>]*value="(\d+)"', m.group(1))
-            if len(vals) >= 4:
-                rx_turnover, rx_cur = int(vals[0]), int(vals[1])
-                tx_turnover, tx_cur = int(vals[2]), int(vals[3])
-                stats.append({
-                    "port": i + 1,
-                    "rx_bytes": rx_turnover * (2 ** 32) + rx_cur,
-                    "tx_bytes": tx_turnover * (2 ** 32) + tx_cur,
-                })
-        return stats
+        return self.chud.switch_debug()
 
     def _tool_switch_get_system_info(self) -> Any:
-        html = self.switch.get("switch_info.cgi")
-        info: Dict[str, str] = {}
-        for field, pattern in [
-            ("name",     r'id="switch_name"[^>]*value="([^"]+)"'),
-            ("firmware", r'firmware[^<]*<td[^>]*>([^<]+)</td>'),
-            ("mac",      r'MAC[^<]*<td[^>]*>([^<]+)</td>'),
-        ]:
-            m = re.search(pattern, html, re.IGNORECASE)
-            if m:
-                info[field] = m.group(1).strip()
-        return info
+        return self.chud.switch_debug()
 
     def _tool_switch_reboot(self) -> Any:
-        self.switch.post("device_reboot.cgi", {"CBox": "on"})
-        return {"success": True, "message": "Switch rebooting"}
+        return self.chud.switch_vlan({"action": "reboot"})
