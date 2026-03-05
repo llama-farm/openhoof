@@ -97,6 +97,21 @@ class Agent:
         config_path = llamafarm_config or os.path.join(workspace_dir, "llamafarm.yaml")
         self.model_loader = ModelLoader(config_path)
         self.model_name = model  # Optional override
+
+        # Router — FunctionGemmaRouter (None when not configured)
+        from .router import FunctionGemmaRouter
+        router_cfg = self.model_loader.config.get_model_config("router")
+        reasoning_cfg = self.model_loader.config.get_model_config("reasoning")
+        router_model = router_cfg.get("model", "")
+        reasoning_model = reasoning_cfg.get("model", "")
+        if router_model and router_model != reasoning_model:
+            self.router: Optional[FunctionGemmaRouter] = FunctionGemmaRouter(
+                endpoint=self.model_loader.config.endpoint,
+                model=router_model,
+                confidence_threshold=router_cfg.get("confidence_threshold", 0.85),
+            )
+        else:
+            self.router = None
         
         # Event system
         self.events = EventQueue()
@@ -141,8 +156,8 @@ class Agent:
         self.custom: Dict[str, Any] = {}
         
         router_status = (
-            f"two-model (threshold={self.router_confidence_threshold})"
-            if self.model_loader.has_router()
+            f"two-model (threshold={self.router.confidence_threshold})"
+            if self.router is not None
             else "single-model"
         )
         print("🐴 MicroClaw Agent initialized")
@@ -285,8 +300,8 @@ class Agent:
     # ──────────────────────────────────────────────────────────────────────────
 
     def _has_router(self) -> bool:
-        """True if a separate router model (FunctionGemma) is configured."""
-        return self.model_loader.has_router()
+        """True if a FunctionGemmaRouter is configured."""
+        return self.router is not None
 
     def _strip_meta(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -347,10 +362,10 @@ class Agent:
             f"Call {tool_name}",  # fallback: at least correct tool name
         ) or f"Call {tool_name} with params: {params}"
 
-        router_result = self.model_loader.validate_tool_call(
+        router_result = self.router.validate(
             tool_name=tool_name,
             params=params,
-            step_intent=step_intent,
+            intent=step_intent,
             tools=self.tools.to_schema() if len(self.tools) > 0 else [],
         )
 
@@ -363,7 +378,8 @@ class Agent:
             agreed=router_result.agreed,
         )
 
-        if router_result.confidence >= self.router_confidence_threshold:
+        threshold = self.router.confidence_threshold
+        if router_result.confidence >= threshold:
             # FunctionGemma validated — use its normalized params
             print(
                 f"   🚀 Router: {tool_name} "

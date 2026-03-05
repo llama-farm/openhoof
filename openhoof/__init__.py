@@ -23,7 +23,7 @@ Usage:
     agent.run()
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 __author__ = "LlamaFarm"
 
 # Core agent runtime
@@ -36,16 +36,22 @@ from .ddil import DDILBuffer
 from .training import TrainingDataCapture
 from .models import ModelLoader, LlamaFarmConfig, LlamaFarmClient
 
+# Router — FunctionGemma 270M tool routing and param validation
+from .router import FunctionGemmaRouter, RouterResult, FunctionGemmaOutputParser
+
+# Fine-tuning — convert captured data to LlamaFarm SFT jobs
+from .finetune import FinetuneManager, JobStatus
+
 # Tool system (OpenAI-compatible schemas)
 from .tools.base import Tool, ToolContext, ToolResult
 from .tools.registry import ToolRegistry
-from .tool_registry import ToolRegistry as SimpleToolRegistry  # Simpler version for basic use
+from .tool_registry import ToolRegistry as SimpleToolRegistry
 
 # Built-in tools
 from .builtin_tools import (
     get_builtin_tool_schemas,
     builtin_executor,
-    create_tool_schema
+    create_tool_schema,
 )
 
 # Bootstrap
@@ -64,19 +70,28 @@ __all__ = [
     "ModelLoader",
     "LlamaFarmConfig",
     "LlamaFarmClient",
-    
+
+    # Router
+    "FunctionGemmaRouter",
+    "RouterResult",
+    "FunctionGemmaOutputParser",
+
+    # Fine-tuning
+    "FinetuneManager",
+    "JobStatus",
+
     # Tool system
     "Tool",
     "ToolContext",
     "ToolResult",
     "ToolRegistry",
     "SimpleToolRegistry",
-    
+
     # Built-in tools
     "get_builtin_tool_schemas",
     "builtin_executor",
     "create_tool_schema",
-    
+
     # Bootstrap
     "bootstrap_agent",
 ]
