@@ -201,11 +201,14 @@ class LlamaFarmClient:
         content = message.get("content", "") or ""
         tool_calls = message.get("tool_calls") or []
 
-        # Fallback: some models (e.g. Qwen3 native format) output tool calls
-        # as <tool_call>{...}</tool_call> tags inside content instead of the
-        # OpenAI tool_calls field.  Parse them and promote to tool_calls.
+        # Fallback: some models output tool calls as text instead of the
+        # OpenAI tool_calls field.  Detect and promote to tool_calls.
         if not tool_calls and "<tool_call>" in content:
+            # Qwen3 / generic JSON-in-tag format: <tool_call>{"name":...}</tool_call>
             tool_calls, content = self._extract_tool_calls_from_content(content)
+        if not tool_calls and "<start_function_call>" in content:
+            # FunctionGemma native format: <start_function_call>call:name{...}<end_function_call>
+            tool_calls, content = self._extract_functiongemma_tool_calls(content)
 
         return {
             "content": content,
@@ -255,6 +258,57 @@ class LlamaFarmClient:
             })
         # Strip all <tool_call> blocks from content
         remaining = pattern.sub("", content).strip()
+        return tool_calls, remaining
+
+    @staticmethod
+    def _extract_functiongemma_tool_calls(content: str):
+        """
+        Parse FunctionGemma native output format:
+            <start_function_call>call:TOOL_NAME{key:<escape>val<escape>, ...}<end_function_call>
+
+        <escape>VALUE<escape> wraps string values; numbers appear bare.
+        Only the FIRST valid call is used (router model — single call expected).
+
+        Returns:
+            (tool_calls list in OpenAI format, remaining_content str)
+        """
+        import re, uuid
+
+        block_pat = re.compile(
+            r"<start_function_call>\s*call:(\w+)\{(.*?)\}\s*<end_function_call>",
+            re.DOTALL,
+        )
+        # Values: either <escape>TEXT<escape> or a bare number
+        val_pat = re.compile(
+            r"(\w+):\s*(?:<escape>(.*?)<escape>|(-?\d+(?:\.\d+)?))",
+            re.DOTALL,
+        )
+
+        tool_calls = []
+        for block in block_pat.finditer(content):
+            tool_name = block.group(1)
+            body = block.group(2)
+            args: Dict[str, Any] = {}
+            for m in val_pat.finditer(body):
+                key = m.group(1)
+                str_val = m.group(2)
+                num_val = m.group(3)
+                if str_val is not None:
+                    args[key] = str_val
+                elif num_val is not None:
+                    args[key] = float(num_val) if "." in num_val else int(num_val)
+            tool_calls.append({
+                "id": f"call_{uuid.uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "arguments": json.dumps(args),
+                },
+            })
+            # Only take the first valid call from the router
+            break
+
+        remaining = block_pat.sub("", content).strip()
         return tool_calls, remaining
 
     def _confidence_from_logprobs(

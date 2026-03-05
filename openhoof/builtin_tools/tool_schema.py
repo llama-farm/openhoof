@@ -60,16 +60,21 @@ def create_tool_schema(
     
     description = " ".join(parts)
     
+    # Normalize parameters: ensure every property has a 'description' field.
+    # Some model templates (e.g. FunctionGemma) require description on each
+    # property and will fail / fall back to text mode without it.
+    normalized = parameters or {"type": "object", "properties": {}, "required": []}
+    if "properties" in normalized:
+        for prop_name, prop_def in normalized["properties"].items():
+            if "description" not in prop_def:
+                prop_def["description"] = prop_name.replace("_", " ")
+
     # Build OpenAI-compatible schema
     return {
         "type": "function",
         "function": {
             "name": name,
             "description": description,
-            "parameters": parameters or {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
+            "parameters": normalized,
         }
     }

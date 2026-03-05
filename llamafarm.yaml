@@ -9,9 +9,8 @@ endpoint: "http://localhost:11540/v1"  # Universal Runtime
 # Model definitions
 models:
   # Function router - fast tool routing (<300ms)
-  # NOTE: FunctionGemma not loaded on Universal Runtime — using Qwen3 (disables two-model mode)
   router:
-    model: "unsloth/Qwen3-1.7B-GGUF"
+    model: "unsloth/functiongemma-270m-it-GGUF"
     temperature: 0.1
     max_tokens: 512
     confidence_threshold: 0.85  # Min confidence to use router's normalized params
