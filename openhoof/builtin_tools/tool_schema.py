@@ -40,26 +40,17 @@ def create_tool_schema(
         ...     safety=["Abort if wind > 15 m/s"]
         ... )
     """
-    # Build rich description from parts
-    parts = [summary]
-    
-    if when_to_use:
-        parts.append(f"When to use: {when_to_use}.")
-    
-    if prerequisites:
-        prereq_str = ", ".join(prerequisites)
-        parts.append(f"Prerequisites: {prereq_str}.")
-    
-    if best_practices:
-        practice_str = " ".join(best_practices)
-        parts.append(f"Best practice: {practice_str}.")
-    
+    # Model-facing description: summary ONLY.
+    # FunctionGemma 270M reads ~8 tokens — long descriptions hurt accuracy.
+    # when_to_use is stored as metadata (x-guidance) for the SyntheticDataGenerator;
+    # it is NOT included in the description sent to the model.
+    description = summary.rstrip(".")
+
+    # Safety constraints go into the description (they're model-relevant).
     if safety:
         safety_str = " ".join(safety)
-        parts.append(f"Safety: {safety_str}.")
-    
-    description = " ".join(parts)
-    
+        description += f" Safety: {safety_str}"
+
     # Normalize parameters: ensure every property has a 'description' field.
     # Some model templates (e.g. FunctionGemma) require description on each
     # property and will fail / fall back to text mode without it.
@@ -69,8 +60,10 @@ def create_tool_schema(
             if "description" not in prop_def:
                 prop_def["description"] = prop_name.replace("_", " ")
 
-    # Build OpenAI-compatible schema
-    return {
+    # Build OpenAI-compatible schema with metadata sidecar.
+    # x-guidance is ignored by model inference but used by SyntheticDataGenerator
+    # to understand intent when building teacher prompts.
+    schema: Dict[str, Any] = {
         "type": "function",
         "function": {
             "name": name,
@@ -78,3 +71,15 @@ def create_tool_schema(
             "parameters": normalized,
         }
     }
+
+    guidance_parts = []
+    if when_to_use:
+        guidance_parts.append(when_to_use)
+    if prerequisites:
+        guidance_parts.append("Prerequisites: " + ", ".join(prerequisites))
+    if best_practices:
+        guidance_parts.append("Best practice: " + " ".join(best_practices))
+    if guidance_parts:
+        schema["x-guidance"] = " | ".join(guidance_parts)
+
+    return schema

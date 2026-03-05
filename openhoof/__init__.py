@@ -77,6 +77,21 @@ from .builtin_tools import (
     create_tool_schema,
 )
 
+# Training refinement loop
+from .refine import (
+    RefinementLoop,
+    EvalReport,
+    EvalExample,
+    CategorizationReport,
+    MissCategorization,
+    MergeStats,
+    CATEGORY_CONTRADICTION,
+    CATEGORY_ZERO_COVERAGE,
+    CATEGORY_HALLUCINATED,
+    CATEGORY_WRONG_FALLBACK,
+    CATEGORY_AMBIGUOUS,
+)
+
 # Bootstrap
 from .bootstrap import bootstrap_agent
 
@@ -128,6 +143,19 @@ __all__ = [
     "get_builtin_tool_schemas",
     "builtin_executor",
     "create_tool_schema",
+
+    # Refinement loop
+    "RefinementLoop",
+    "EvalReport",
+    "EvalExample",
+    "CategorizationReport",
+    "MissCategorization",
+    "MergeStats",
+    "CATEGORY_CONTRADICTION",
+    "CATEGORY_ZERO_COVERAGE",
+    "CATEGORY_HALLUCINATED",
+    "CATEGORY_WRONG_FALLBACK",
+    "CATEGORY_AMBIGUOUS",
 
     # Bootstrap
     "bootstrap_agent",

@@ -1093,15 +1093,46 @@ class SyntheticDataGenerator:
         output_dir: str,
         prefix: str,
         holdout_pct: float,
+        max_eval_per_tool: int = 3,
     ) -> Tuple[Path, Optional[Path]]:
+        """
+        Split examples into train / eval sets.
+
+        The eval set is capped at max_eval_per_tool examples per tool to ensure
+        uniform per-tool coverage. Without capping, high-synonym tools dominate
+        the eval set and skew the accuracy metric (Ace's lesson: eval skew is
+        distinct from training distribution — the former should be uniform).
+        """
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
         today = date.today()
 
         if holdout_pct > 0 and len(examples) >= 10:
-            split = max(1, int(len(examples) * holdout_pct))
-            train_examples = examples[split:]
-            eval_examples = examples[:split]
+            # Extract per-tool capped eval set first, then use remainder as train
+            import random
+            from collections import defaultdict
+
+            by_tool: dict = defaultdict(list)
+            for ex in examples:
+                convs = ex.get("conversations", [])
+                gpt = next((c.get("value", "") for c in convs if c.get("from") == "gpt"), "")
+                tool = gpt.split("(")[0] if gpt else "__unknown__"
+                by_tool[tool].append(ex)
+
+            eval_examples: List[Dict] = []
+            train_examples: List[Dict] = []
+
+            for tool, tool_exs in by_tool.items():
+                shuffled = list(tool_exs)
+                random.shuffle(shuffled)
+                # Cap eval at max_eval_per_tool; rest goes to train
+                n_eval = min(max_eval_per_tool, max(1, int(len(shuffled) * holdout_pct)))
+                eval_examples.extend(shuffled[:n_eval])
+                train_examples.extend(shuffled[n_eval:])
+
+            # Shuffle both sets
+            random.shuffle(eval_examples)
+            random.shuffle(train_examples)
         else:
             train_examples = examples
             eval_examples = []

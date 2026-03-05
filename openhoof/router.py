@@ -329,23 +329,32 @@ class ToolRouter:
         model: str,
         confidence_threshold: float = 0.85,
         temperature: float = 0.1,
-        max_tokens: int = 256,
+        max_tokens: int = 128,
         timeout: int = 15,
         system_prompt: Optional[str] = None,
+        strip_tool_descriptions: bool = True,
     ):
         """
         Args:
-            endpoint:             LlamaFarm/UR base URL (e.g. http://localhost:11540/v1)
-            model:                Any model ID supported by the endpoint
-                                  Examples:
-                                    "unsloth/functiongemma-270m-it-GGUF"  (default router)
-                                    "unsloth/Qwen3-0.6B-GGUF"            (small general model)
-                                    "local/my-finetuned-router"           (custom fine-tune)
-            confidence_threshold: Min confidence to trust Router's params (default 0.85)
-            temperature:          Sampling temperature (low = deterministic; default 0.1)
-            max_tokens:           Max tokens for router response (default 256)
-            timeout:              HTTP timeout in seconds
-            system_prompt:        Override the default router system prompt
+            endpoint:                LlamaFarm/UR base URL (e.g. http://localhost:11540/v1)
+            model:                   Any model ID supported by the endpoint
+                                     Examples:
+                                       "unsloth/functiongemma-270m-it-GGUF"  (default router)
+                                       "unsloth/Qwen3-0.6B-GGUF"            (small general model)
+                                       "local/my-finetuned-router"           (custom fine-tune)
+            confidence_threshold:    Min confidence to trust Router's params (default 0.85)
+            temperature:             Sampling temperature (low = deterministic; default 0.1)
+            max_tokens:              Max tokens for router response (default 128)
+                                     Keep low — single tool calls are < 30 tokens.
+                                     Low max_tokens prevents the base FunctionGemma model from
+                                     chaining multiple <start_function_call> blocks.
+            timeout:                 HTTP timeout in seconds
+            system_prompt:           Override the default router system prompt
+            strip_tool_descriptions: Remove description fields before sending to model.
+                                     Default True for FunctionGemma 270M — the model learns
+                                     routing purely from (input → output) pairs during SFT;
+                                     long descriptions in the prompt cause hallucination.
+                                     Set False for larger models that benefit from context.
         """
         self.endpoint = endpoint.rstrip("/")
         self.model = model
@@ -354,6 +363,43 @@ class ToolRouter:
         self.max_tokens = max_tokens
         self.timeout = timeout
         self.system_prompt = system_prompt or self.DEFAULT_SYSTEM_PROMPT
+        self.strip_tool_descriptions = strip_tool_descriptions
+
+    @staticmethod
+    def _slim_tools(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Strip description fields from tool schemas for FunctionGemma inference.
+
+        FunctionGemma 270M is a router — it learns the mapping purely from
+        fine-tuning data, NOT from reading descriptions at inference time.
+        Long descriptions cause the model to echo them back (hallucination).
+
+        What we keep: name + parameter names/types (enough to format the call).
+        What we drop: description, x-guidance, property descriptions.
+        """
+        slim = []
+        for tool in tools:
+            fn = tool.get("function", tool)
+            slimmed_params: Dict[str, Any] = {"type": "object", "properties": {}, "required": []}
+            raw_params = fn.get("parameters", {})
+            for prop_name, prop_def in raw_params.get("properties", {}).items():
+                slimmed_params["properties"][prop_name] = {
+                    k: v for k, v in prop_def.items()
+                    if k in ("type", "enum")          # name + type only
+                }
+            slimmed_params["required"] = raw_params.get("required", [])
+
+            slim.append({
+                "type": "function",
+                "function": {
+                    "name": fn["name"],
+                    # Single-word summary keeps the Jinja2 template sane
+                    # but gives the model a minimal function registry to index from.
+                    "description": fn.get("name", "").replace("_", " "),
+                    "parameters": slimmed_params,
+                },
+            })
+        return slim
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -426,13 +472,15 @@ class ToolRouter:
         """Call the router model with a single-turn intent + tool schemas."""
         import requests
 
+        inference_tools = self._slim_tools(tools) if self.strip_tool_descriptions else tools
+
         payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user",   "content": intent},
             ],
-            "tools":       tools,
+            "tools":       inference_tools,
             "max_tokens":  self.max_tokens,
             "temperature": self.temperature,
             "logprobs":    True,
