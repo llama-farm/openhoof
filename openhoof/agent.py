@@ -339,9 +339,9 @@ class Agent:
         # Priority: Reasoner's text content → tool name as fallback
         step_intent = next(
             (
-                m.get("content", "").strip()
+                (m.get("content") or "").strip()
                 for m in reversed(messages)
-                if m.get("role") == "assistant" and m.get("content", "").strip()
+                if m.get("role") == "assistant" and (m.get("content") or "").strip()
                 and not m.get("tool_calls")  # text-only assistant message = thinking
             ),
             f"Call {tool_name}",  # fallback: at least correct tool name
