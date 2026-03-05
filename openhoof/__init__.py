@@ -36,8 +36,16 @@ from .ddil import DDILBuffer
 from .training import TrainingDataCapture
 from .models import ModelLoader, LlamaFarmConfig, LlamaFarmClient
 
-# Router — FunctionGemma 270M tool routing and param validation
-from .router import FunctionGemmaRouter, RouterResult, FunctionGemmaOutputParser
+# Router — model-agnostic tool routing and param validation
+from .router import (
+    ToolRouter,
+    FunctionGemmaRouter,        # backward-compat alias for ToolRouter
+    RouterResult,
+    OutputParser,
+    ToolCallTagParser,
+    FunctionGemmaOutputParser,
+    ConfidenceExtractor,
+)
 
 # Fine-tuning — convert captured data to LlamaFarm SFT jobs
 from .finetune import FinetuneManager, JobStatus
@@ -72,9 +80,13 @@ __all__ = [
     "LlamaFarmClient",
 
     # Router
-    "FunctionGemmaRouter",
+    "ToolRouter",
+    "FunctionGemmaRouter",          # backward-compat alias
     "RouterResult",
+    "OutputParser",
+    "ToolCallTagParser",
     "FunctionGemmaOutputParser",
+    "ConfidenceExtractor",
 
     # Fine-tuning
     "FinetuneManager",

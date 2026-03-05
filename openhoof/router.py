@@ -1,30 +1,46 @@
 """
-FunctionGemma Router — first-class routing component for OpenHoof.
+ToolRouter — model-agnostic tool routing for OpenHoof.
 
 ## Architecture
 
-The Router is a 270M model that does ONE thing: map an intent to a tool call.
-It is NOT the reasoning engine. The Reasoner (Qwen3) decides WHAT to do;
+The Router is a small, fast model that does ONE thing: map an intent to a
+tool call. It is NOT the reasoning engine. The Reasoner decides WHAT to do;
 the Router validates and normalizes the parameters.
+
+Any model can serve as the router — not just FunctionGemma. The router
+auto-detects the output format and parses it accordingly:
+
+    Format 1 — OpenAI native tool_calls (returned directly by UR for most models)
+    Format 2 — <tool_call>{"name":...,"arguments":...}</tool_call>  (JSON-in-tag)
+    Format 3 — <start_function_call>call:name{...}<end_function_call> (FunctionGemma native)
 
 ## Two operating modes
 
 ### Validation mode (default in agent.reason())
-    Reasoner has already decided: "call get_flight_data with flight_id=MAY101"
-    Router validates the params against the schema and normalizes if needed.
-    High confidence → use Router's params. Low confidence → use Reasoner's params.
+    Reasoner chose tool + params. Router validates/normalizes.
+    High confidence → use Router's params.
+    Low confidence  → fall back to Reasoner's params as-is.
 
-### Routing mode (direct use)
-    Caller provides intent, Router picks the tool entirely.
-    Used for: fast event-driven routing, streaming, direct tool dispatch.
+### Routing mode (direct dispatch)
+    Caller provides intent only. Router picks tool + params entirely.
+    Used for: fast event-driven routing, streaming, keyword dispatch.
 
-## Output format
+## Configuring the router model
 
-FunctionGemma outputs its native format:
-    <start_function_call>call:tool_name{key:<escape>value<escape>}<end_function_call>
+In llamafarm.yaml:
 
-The Router parses this internally and returns a clean RouterResult.
-Callers never see the raw model output.
+    models:
+      router:
+        model: "unsloth/functiongemma-270m-it-GGUF"   # default
+        # model: "unsloth/Qwen3-0.6B-GGUF"            # any small model
+        # model: "local/my-finetuned-router"           # fine-tuned local model
+        temperature: 0.1
+        confidence_threshold: 0.85
+
+Or directly:
+
+    from openhoof.router import ToolRouter
+    router = ToolRouter(endpoint="http://localhost:11540/v1", model="unsloth/Qwen3-0.6B-GGUF")
 
 ## Fine-tuning
 
@@ -33,7 +49,7 @@ Use FinetuneManager to convert captures → LlamaFarm SFT job:
 
     from openhoof.finetune import FinetuneManager
     ft = FinetuneManager(endpoint="http://localhost:11540/v1")
-    job_id = ft.finetune_router(".microclaw/training")
+    job_id = ft.finetune_router(".microclaw/training", model="unsloth/functiongemma-270m-it")
 """
 
 from __future__ import annotations
@@ -42,7 +58,7 @@ import json
 import math
 import re
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 
@@ -50,38 +66,139 @@ from typing import Any, Dict, List, Optional
 
 @dataclass
 class RouterResult:
-    """Result from a Router call."""
+    """Result from a router model call."""
     tool_name: str
     params: Dict[str, Any]
     confidence: float           # 0.0–1.0; from logprobs when available, else 0.0
     agreed: bool                # True if Router chose same tool as Reasoner
-    raw_content: str = ""       # Raw text output from the model (for debugging)
+    raw_content: str = ""       # Raw text output (for debugging / training capture)
 
     @property
     def trusted(self) -> bool:
-        """True when confidence meets the default threshold (0.85)."""
-        return self.confidence >= 0.85
+        """True when confidence meets the router's configured threshold."""
+        return self.confidence >= 0.85  # Agent overrides this via router.confidence_threshold
 
 
-# ── Parser ────────────────────────────────────────────────────────────────────
+# ── Output parsers ────────────────────────────────────────────────────────────
+
+class OutputParser:
+    """
+    Base output parser — tries all known formats in order.
+
+    Format priority:
+      1. OpenAI tool_calls field  (structured, most reliable)
+      2. <tool_call> JSON tags    (Qwen3, generic fine-tuned models)
+      3. FunctionGemma native     (<start_function_call>call:name{...})
+
+    Returns the first successful parse, or None if nothing matches.
+    """
+
+    @staticmethod
+    def parse(response: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Parse a router model response into {"name": str, "arguments": dict}.
+
+        Args:
+            response: Raw response dict from the model API
+
+        Returns:
+            {"name": tool_name, "arguments": params_dict} or None
+        """
+        # 1. OpenAI tool_calls field (UR returns this for most models natively)
+        tool_calls = response.get("tool_calls") or []
+        if tool_calls:
+            tc = tool_calls[0]
+            func = tc.get("function", {})
+            name = func.get("name", "")
+            try:
+                args = json.loads(func.get("arguments", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                args = {}
+            if name:
+                return {"name": name, "arguments": args}
+
+        # 2. <tool_call>{...}</tool_call> JSON tags
+        content = response.get("content", "") or ""
+        if "<tool_call>" in content:
+            result = ToolCallTagParser.parse(content)
+            if result:
+                return result
+
+        # 3. FunctionGemma native <start_function_call>call:name{...}
+        if "<start_function_call>" in content:
+            result = FunctionGemmaOutputParser.parse(content)
+            if result:
+                return result
+
+        return None
+
+
+class ToolCallTagParser:
+    """
+    Parse <tool_call>{"name": ..., "arguments": ...}</tool_call> format.
+
+    Used by: Qwen3, generic fine-tuned models, any model trained to output
+    JSON tool calls in tag format.
+    """
+
+    _PATTERN = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
+
+    @classmethod
+    def parse(cls, content: str) -> Optional[Dict[str, Any]]:
+        m = cls._PATTERN.search(content)
+        if not m:
+            return None
+        try:
+            data = json.loads(m.group(1).strip())
+        except json.JSONDecodeError:
+            return None
+        name = data.get("name")
+        if not name:
+            return None
+        args = data.get("arguments", data.get("parameters", {}))
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                args = {}
+        return {"name": name, "arguments": args}
+
+    @classmethod
+    def parse_all(cls, content: str) -> List[Dict[str, Any]]:
+        """Parse all <tool_call> blocks (for multi-call content)."""
+        results = []
+        for m in cls._PATTERN.finditer(content):
+            try:
+                data = json.loads(m.group(1).strip())
+                name = data.get("name")
+                if name:
+                    args = data.get("arguments", {})
+                    results.append({"name": name, "arguments": args})
+            except json.JSONDecodeError:
+                continue
+        return results
+
+    @classmethod
+    def strip(cls, content: str) -> str:
+        """Remove all <tool_call> blocks from content."""
+        return cls._PATTERN.sub("", content).strip()
+
 
 class FunctionGemmaOutputParser:
     """
-    Parse FunctionGemma's native output format into structured RouterResult.
+    Parse FunctionGemma's native output format.
 
-    FunctionGemma produces:
+    Format:
         <start_function_call>call:TOOL_NAME{key:<escape>VALUE<escape>,...}<end_function_call>
 
-    Numbers may be bare (no <escape> tags). Only the first call is extracted
-    (the Router is a single-dispatch model — one intent → one tool call).
+    <escape>VALUE<escape> wraps string values; bare numbers are also supported.
+    Only the first call is returned (router is single-dispatch by design).
     """
 
-    # Matches the outermost <start_function_call>...<end_function_call> block
     _BLOCK = re.compile(
         r"<start_function_call>\s*call:(\w+)\{(.*?)\}\s*<end_function_call>",
         re.DOTALL,
     )
-    # Matches individual key:value pairs inside the block
     _PARAM = re.compile(
         r"(\w+):\s*(?:<escape>(.*?)<escape>|(-?\d+(?:\.\d+)?))",
         re.DOTALL,
@@ -89,21 +206,12 @@ class FunctionGemmaOutputParser:
 
     @classmethod
     def parse(cls, content: str) -> Optional[Dict[str, Any]]:
-        """
-        Parse the first tool call from FunctionGemma output.
-
-        Returns:
-            {"name": str, "arguments": dict} or None if no call found.
-        """
         m = cls._BLOCK.search(content)
         if not m:
             return None
-
         tool_name = m.group(1)
-        body = m.group(2)
         args: Dict[str, Any] = {}
-
-        for pm in cls._PARAM.finditer(body):
+        for pm in cls._PARAM.finditer(m.group(2)):
             key = pm.group(1)
             str_val = pm.group(2)
             num_val = pm.group(3)
@@ -111,34 +219,18 @@ class FunctionGemmaOutputParser:
                 args[key] = str_val
             elif num_val is not None:
                 args[key] = float(num_val) if "." in num_val else int(num_val)
-
         return {"name": tool_name, "arguments": args}
-
-    @classmethod
-    def to_openai_tool_call(cls, parsed: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert parsed result to OpenAI tool_call format."""
-        return {
-            "id": f"call_{uuid.uuid4().hex[:8]}",
-            "type": "function",
-            "function": {
-                "name": parsed["name"],
-                "arguments": json.dumps(parsed["arguments"]),
-            },
-        }
 
 
 # ── Confidence extraction ─────────────────────────────────────────────────────
 
 class ConfidenceExtractor:
     """
-    Extract real confidence scores from logprobs for a given tool name.
+    Extract real confidence from logprobs for a specific tool name.
 
-    Searches the token stream for the tool name and converts logprob to
-    probability: confidence = exp(logprob).
-
-    Handles two cases:
-    1. Tool name as a single token   → exact match
-    2. Tool name split across tokens → assembles and uses first token's logprob
+    Works for any model that returns logprobs — model-agnostic.
+    Searches the token stream for the tool name token(s) and converts
+    the log probability to a probability: confidence = exp(logprob).
     """
 
     @staticmethod
@@ -152,7 +244,6 @@ class ConfidenceExtractor:
             token = tok.get("token", "")
             logprob = tok.get("logprob")
 
-            # Full match in one token
             if tool_name in token and logprob is not None:
                 return round(math.exp(logprob), 4)
 
@@ -167,7 +258,6 @@ class ConfidenceExtractor:
                             return round(math.exp(logprob), 4)
                         break
 
-        # Check top_logprobs at each position
         for tok in tokens:
             for candidate in tok.get("top_logprobs", []):
                 if tool_name in candidate.get("token", ""):
@@ -178,13 +268,23 @@ class ConfidenceExtractor:
         return None
 
 
-# ── Router ────────────────────────────────────────────────────────────────────
+# ── ToolRouter ────────────────────────────────────────────────────────────────
 
-class FunctionGemmaRouter:
+class ToolRouter:
     """
-    FunctionGemma 270M router — validates and normalizes tool calls.
+    Model-agnostic tool router — validates and normalizes tool calls.
 
-    Usage (validation mode — called from agent.reason()):
+    Works with any model that can output tool calls in one of the
+    supported formats (OpenAI tool_calls, <tool_call> JSON, or
+    FunctionGemma native). The model is configured via llamafarm.yaml
+    or passed directly.
+
+    Typical usage (validation mode — called from agent.reason()):
+
+        router = ToolRouter(
+            endpoint="http://localhost:11540/v1",
+            model="unsloth/functiongemma-270m-it-GGUF",   # or any other model
+        )
         result = router.validate(
             tool_name="get_flight_data",
             params={"flight_id": "MAY101"},
@@ -192,19 +292,17 @@ class FunctionGemmaRouter:
             tools=tool_schemas,
         )
         if result.trusted:
-            use result.params   # Router normalized them
+            use result.params      # Router normalized them
         else:
-            use reasoner_params # Router uncertain; keep Reasoner's choice
+            use reasoner_params    # Router uncertain
 
-    Usage (routing mode — direct dispatch):
-        result = router.route(
-            intent="What is the fuel burn for MAY101?",
-            tools=tool_schemas,
-        )
-        # result.tool_name, result.params
+    Direct routing mode:
+
+        result = router.route(intent="Get fuel data for MAY101", tools=tool_schemas)
+        print(result.tool_name, result.params)
     """
 
-    SYSTEM_PROMPT = (
+    DEFAULT_SYSTEM_PROMPT = (
         "You are a function router. "
         "Given a user request and available functions, select the correct function "
         "and return its parameters. Return a single function call only."
@@ -213,15 +311,34 @@ class FunctionGemmaRouter:
     def __init__(
         self,
         endpoint: str,
-        model: str = "unsloth/functiongemma-270m-it-GGUF",
+        model: str,
         confidence_threshold: float = 0.85,
+        temperature: float = 0.1,
+        max_tokens: int = 256,
         timeout: int = 15,
+        system_prompt: Optional[str] = None,
     ):
+        """
+        Args:
+            endpoint:             LlamaFarm/UR base URL (e.g. http://localhost:11540/v1)
+            model:                Any model ID supported by the endpoint
+                                  Examples:
+                                    "unsloth/functiongemma-270m-it-GGUF"  (default router)
+                                    "unsloth/Qwen3-0.6B-GGUF"            (small general model)
+                                    "local/my-finetuned-router"           (custom fine-tune)
+            confidence_threshold: Min confidence to trust Router's params (default 0.85)
+            temperature:          Sampling temperature (low = deterministic; default 0.1)
+            max_tokens:           Max tokens for router response (default 256)
+            timeout:              HTTP timeout in seconds
+            system_prompt:        Override the default router system prompt
+        """
         self.endpoint = endpoint.rstrip("/")
         self.model = model
         self.confidence_threshold = confidence_threshold
+        self.temperature = temperature
+        self.max_tokens = max_tokens
         self.timeout = timeout
-        self._parser = FunctionGemmaOutputParser()
+        self.system_prompt = system_prompt or self.DEFAULT_SYSTEM_PROMPT
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -235,22 +352,21 @@ class FunctionGemmaRouter:
         """
         Validate and optionally normalize params for an already-chosen tool.
 
-        The Reasoner has decided WHAT tool to call. The Router's job is to
-        check whether the params are correct and normalized. If the Router
-        agrees and is confident, its normalized params are used. Otherwise
-        the Reasoner's params are used as-is.
+        The Reasoner has decided WHAT tool to call. The Router checks whether
+        the params are correct. If the Router agrees and is confident, its
+        normalized params are used. Otherwise the Reasoner's params are kept.
 
         Args:
             tool_name:  Tool the Reasoner chose
-            params:     Parameters the Reasoner supplied
-            intent:     Single-step intent (NOT the full task — just this step)
-            tools:      Full list of available tool schemas
+            params:     Params the Reasoner supplied
+            intent:     Single-step intent for this call (NOT the full task)
+            tools:      All available tool schemas
 
         Returns:
-            RouterResult with confidence score and (possibly normalized) params
+            RouterResult — use .trusted to check whether to prefer Router's params
         """
         response = self._call(intent, tools)
-        return self._build_result(response, tool_name, params)
+        return self._build_result(response, reasoner_tool=tool_name, reasoner_params=params)
 
     def route(
         self,
@@ -258,17 +374,17 @@ class FunctionGemmaRouter:
         tools: List[Dict[str, Any]],
     ) -> RouterResult:
         """
-        Route an intent directly to a tool call (no prior Reasoner decision).
+        Route an intent directly to a tool call without a prior Reasoner decision.
 
         Args:
             intent: User intent or agent step description
-            tools:  Full list of available tool schemas
+            tools:  All available tool schemas
 
         Returns:
             RouterResult with chosen tool and params
         """
         response = self._call(intent, tools)
-        parsed = FunctionGemmaOutputParser.parse(response.get("content", ""))
+        parsed = OutputParser.parse(response)
         if not parsed:
             return RouterResult(
                 tool_name="",
@@ -291,29 +407,20 @@ class FunctionGemmaRouter:
 
     # ── Internal ───────────────────────────────────────────────────────────────
 
-    def _call(
-        self,
-        intent: str,
-        tools: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        """
-        Call FunctionGemma with a single-turn intent + tool schemas.
-
-        Requests logprobs for real confidence scores.
-        Returns the raw API response dict.
-        """
-        import requests  # lazy import — keep module weight low
+    def _call(self, intent: str, tools: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Call the router model with a single-turn intent + tool schemas."""
+        import requests
 
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": self.SYSTEM_PROMPT},
-                {"role": "user", "content": intent},
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user",   "content": intent},
             ],
-            "tools": tools,
-            "max_tokens": 256,
-            "temperature": 0.1,
-            "logprobs": True,
+            "tools":       tools,
+            "max_tokens":  self.max_tokens,
+            "temperature": self.temperature,
+            "logprobs":    True,
             "top_logprobs": 5,
         }
 
@@ -327,25 +434,11 @@ class FunctionGemmaRouter:
             data = r.json()
             choice = data.get("choices", [{}])[0]
             msg = choice.get("message", {})
-            content = msg.get("content") or ""
-
-            # UR may have parsed tool_calls natively — check both paths
-            tool_calls = msg.get("tool_calls") or []
-            if tool_calls:
-                # Native OpenAI format from UR
-                return {
-                    "tool_calls": tool_calls,
-                    "content": content,
-                    "logprobs": choice.get("logprobs"),
-                }
-            else:
-                # FunctionGemma native format — keep as content for _build_result
-                return {
-                    "tool_calls": [],
-                    "content": content,
-                    "logprobs": choice.get("logprobs"),
-                }
-
+            return {
+                "tool_calls": msg.get("tool_calls") or [],
+                "content":    msg.get("content") or "",
+                "logprobs":   choice.get("logprobs"),
+            }
         except Exception as e:
             return {"tool_calls": [], "content": "", "error": str(e), "logprobs": None}
 
@@ -355,59 +448,45 @@ class FunctionGemmaRouter:
         reasoner_tool: str,
         reasoner_params: Dict[str, Any],
     ) -> RouterResult:
-        """
-        Build a RouterResult from the raw response, comparing to Reasoner's choice.
-        """
+        """Build RouterResult from raw response, comparing to Reasoner's choice."""
         raw_content = response.get("content", "")
-        logprobs = response.get("logprobs")
+        parsed = OutputParser.parse(response)
 
-        # Path 1: UR returned native tool_calls
-        tool_calls = response.get("tool_calls") or []
-        if tool_calls:
-            tc = tool_calls[0]
-            func = tc.get("function", {})
-            fg_name = func.get("name", "")
-            try:
-                fg_params = json.loads(func.get("arguments", "{}"))
-            except (json.JSONDecodeError, TypeError):
-                fg_params = {}
-            confidence = ConfidenceExtractor.extract(logprobs, fg_name) or 0.0
-            agreed = fg_name == reasoner_tool
+        if not parsed:
+            # Router returned nothing useful — zero confidence, Reasoner wins
             return RouterResult(
-                tool_name=fg_name if agreed else reasoner_tool,
-                params=fg_params if agreed else reasoner_params,
-                confidence=confidence,
-                agreed=agreed,
+                tool_name=reasoner_tool,
+                params=reasoner_params,
+                confidence=0.0,
+                agreed=False,
                 raw_content=raw_content,
             )
 
-        # Path 2: FunctionGemma native format in content
-        parsed = FunctionGemmaOutputParser.parse(raw_content)
-        if parsed:
-            fg_name = parsed["name"]
-            fg_params = parsed["arguments"]
-            confidence = ConfidenceExtractor.extract(logprobs, fg_name) or 0.0
-            agreed = fg_name == reasoner_tool
-            return RouterResult(
-                tool_name=fg_name if agreed else reasoner_tool,
-                params=fg_params if agreed else reasoner_params,
-                confidence=confidence,
-                agreed=agreed,
-                raw_content=raw_content,
-            )
+        fg_name = parsed["name"]
+        fg_params = parsed["arguments"]
+        agreed = fg_name == reasoner_tool
+        confidence = (
+            ConfidenceExtractor.extract(response.get("logprobs"), fg_name)
+            or 0.0
+        )
 
-        # Path 3: Router returned nothing useful — zero confidence, use Reasoner's
         return RouterResult(
-            tool_name=reasoner_tool,
-            params=reasoner_params,
-            confidence=0.0,
-            agreed=False,
+            tool_name=fg_name if agreed else reasoner_tool,
+            params=fg_params if agreed else reasoner_params,
+            confidence=confidence,
+            agreed=agreed,
             raw_content=raw_content,
         )
 
     def __repr__(self) -> str:
         return (
-            f"FunctionGemmaRouter("
-            f"model={self.model}, "
+            f"ToolRouter(model={self.model!r}, "
             f"threshold={self.confidence_threshold})"
         )
+
+
+# ── Backward-compat alias ─────────────────────────────────────────────────────
+
+#: Alias for callers that still reference FunctionGemmaRouter by name.
+#: ToolRouter is the correct name going forward.
+FunctionGemmaRouter = ToolRouter

@@ -98,17 +98,20 @@ class Agent:
         self.model_loader = ModelLoader(config_path)
         self.model_name = model  # Optional override
 
-        # Router — FunctionGemmaRouter (None when not configured)
-        from .router import FunctionGemmaRouter
+        # Router — any model configured under models.router in llamafarm.yaml
+        # (None when not configured or when router == reasoning model)
+        from .router import ToolRouter
         router_cfg = self.model_loader.config.get_model_config("router")
         reasoning_cfg = self.model_loader.config.get_model_config("reasoning")
         router_model = router_cfg.get("model", "")
         reasoning_model = reasoning_cfg.get("model", "")
         if router_model and router_model != reasoning_model:
-            self.router: Optional[FunctionGemmaRouter] = FunctionGemmaRouter(
+            self.router: Optional[ToolRouter] = ToolRouter(
                 endpoint=self.model_loader.config.endpoint,
                 model=router_model,
                 confidence_threshold=router_cfg.get("confidence_threshold", 0.85),
+                temperature=router_cfg.get("temperature", 0.1),
+                system_prompt=router_cfg.get("system_prompt"),
             )
         else:
             self.router = None

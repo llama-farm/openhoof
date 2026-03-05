@@ -260,9 +260,14 @@ class FinetuneManager:
     quantized to GGUF for local inference.
     """
 
-    # Default models — HuggingFace format (not GGUF)
-    ROUTER_MODEL   = "unsloth/functiongemma-270m-it"
-    REASONER_MODEL = "unsloth/Qwen3-1.7B"
+    # Default models — HuggingFace format (not GGUF).
+    # These are just defaults; pass any model that supports tool calling.
+    DEFAULT_ROUTER_MODEL   = "unsloth/functiongemma-270m-it"
+    DEFAULT_REASONER_MODEL = "unsloth/Qwen3-1.7B"
+
+    # Back-compat aliases
+    ROUTER_MODEL   = DEFAULT_ROUTER_MODEL
+    REASONER_MODEL = DEFAULT_REASONER_MODEL
 
     def __init__(self, endpoint: str = "http://localhost:11540/v1"):
         self.endpoint = endpoint.rstrip("/")
@@ -511,7 +516,7 @@ class FinetuneManager:
     def finetune_router(
         self,
         training_dir: str,
-        model: str = ROUTER_MODEL,
+        model: str = DEFAULT_ROUTER_MODEL,
         min_examples: int = 10,
         **kwargs: Any,
     ) -> str:
@@ -554,7 +559,7 @@ class FinetuneManager:
     def finetune_reasoner(
         self,
         training_dir: str,
-        model: str = REASONER_MODEL,
+        model: str = DEFAULT_REASONER_MODEL,
         min_examples: int = 5,
         **kwargs: Any,
     ) -> str:
