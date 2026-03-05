@@ -198,14 +198,64 @@ class LlamaFarmClient:
         choice = response["choices"][0]
         message = choice.get("message", {})
 
+        content = message.get("content", "") or ""
+        tool_calls = message.get("tool_calls") or []
+
+        # Fallback: some models (e.g. Qwen3 native format) output tool calls
+        # as <tool_call>{...}</tool_call> tags inside content instead of the
+        # OpenAI tool_calls field.  Parse them and promote to tool_calls.
+        if not tool_calls and "<tool_call>" in content:
+            tool_calls, content = self._extract_tool_calls_from_content(content)
+
         return {
-            "content": message.get("content", ""),
-            "tool_calls": message.get("tool_calls", []),
+            "content": content,
+            "tool_calls": tool_calls,
             "finish_reason": choice.get("finish_reason", "stop"),
             "usage": response.get("usage", {}),
             # logprobs — present only when requested; None otherwise
             "logprobs": choice.get("logprobs"),
         }
+
+    @staticmethod
+    def _extract_tool_calls_from_content(content: str):
+        """
+        Extract <tool_call>{...}</tool_call> blocks from content text.
+
+        Returns:
+            (tool_calls list in OpenAI format, remaining_content str)
+        """
+        import re, uuid
+        pattern = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
+        tool_calls = []
+        for i, m in enumerate(pattern.finditer(content)):
+            raw = m.group(1).strip()
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            # data may be {"name": ..., "arguments": {...}} or just the args dict
+            if "name" in data:
+                name = data["name"]
+                args = data.get("arguments", data.get("parameters", {}))
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except json.JSONDecodeError:
+                        args = {}
+            else:
+                # Bare args dict — skip; we can't determine tool name
+                continue
+            tool_calls.append({
+                "id": f"call_{uuid.uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(args),
+                },
+            })
+        # Strip all <tool_call> blocks from content
+        remaining = pattern.sub("", content).strip()
+        return tool_calls, remaining
 
     def _confidence_from_logprobs(
         self,

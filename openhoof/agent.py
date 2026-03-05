@@ -429,10 +429,14 @@ class Agent:
                 )
                 return response
 
-            # Record Reasoner's decision in shared history (with metadata)
+            # Record Reasoner's decision in shared history (with metadata).
+            # Use None (not "") for content when tool_calls are present — some
+            # runtimes (incl. Universal Runtime) behave differently with empty
+            # string vs null content alongside tool_calls.
+            assistant_content = response.get("content") or None
             messages.append({
                 "role": "assistant",
-                "content": response.get("content", ""),
+                "content": assistant_content,
                 "tool_calls": tool_calls,
                 "_by": "reasoner",
             })
