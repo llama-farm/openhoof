@@ -83,12 +83,18 @@ class RouterResult:
 
 class OutputParser:
     """
-    Base output parser — tries all known formats in order.
+    Format-agnostic output parser — tries all known formats in order.
 
     Format priority:
-      1. OpenAI tool_calls field  (structured, most reliable)
-      2. <tool_call> JSON tags    (Qwen3, generic fine-tuned models)
-      3. FunctionGemma native     (<start_function_call>call:name{...})
+      1. OpenAI tool_calls field      (structured, most reliable)
+      2. <tool_call> JSON tags        (Qwen3, generic fine-tuned models)
+      3. FunctionGemma native         (<start_function_call>call:name{...})
+      4. Text function call syntax    (FunctionGemma fine-tuned with text format)
+                                       e.g. drone_move(yaw_deg=-90)
+
+    Format 4 is produced by FunctionGemma models fine-tuned with the "text"
+    output format from SyntheticDataGenerator. Empirically the most accurate
+    format for 270M models — simpler output pattern = better routing accuracy.
 
     Returns the first successful parse, or None if nothing matches.
     """
@@ -117,8 +123,9 @@ class OutputParser:
             if name:
                 return {"name": name, "arguments": args}
 
-        # 2. <tool_call>{...}</tool_call> JSON tags
         content = response.get("content", "") or ""
+
+        # 2. <tool_call>{...}</tool_call> JSON tags
         if "<tool_call>" in content:
             result = ToolCallTagParser.parse(content)
             if result:
@@ -128,6 +135,14 @@ class OutputParser:
         if "<start_function_call>" in content:
             result = FunctionGemmaOutputParser.parse(content)
             if result:
+                return result
+
+        # 4. Text function call syntax: tool_name(param=value, ...)
+        # Used by FunctionGemma models fine-tuned with text output format
+        if content and re.match(r"^\w+\(", content.strip()):
+            from .synth import parse_text_call
+            result = parse_text_call(content.strip())
+            if result and result.get("name"):
                 return result
 
         return None
