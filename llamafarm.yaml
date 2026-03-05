@@ -12,12 +12,12 @@ models:
   # After fine-tuning, reference trained models by ft:{job_id} alias
   # (PR #785: ft: prefix resolved server-side, no GGUF path needed).
   # Examples:
-  #   model: "unsloth/functiongemma-270m-it-GGUF"   # base FunctionGemma
+  #   model: "ft:da674646"  # Round 4 best: 83-87% on 29-tool network eval   # base FunctionGemma
   #   model: "ft:911f2779"                           # fine-tuned (post-promote)
   #   model: "local/functiongemma-ft"                # local alias (post-promote)
   #   model: "unsloth/Qwen3-0.6B-GGUF"              # any small model
   router:
-    model: "unsloth/functiongemma-270m-it-GGUF"
+    model: "ft:da674646"  # Round 4 best: 83-87% on 29-tool network eval
     temperature: 0.1
     max_tokens: 512
     confidence_threshold: 0.85  # Min confidence to use router's normalized params
