@@ -8,7 +8,14 @@ endpoint: "http://localhost:11540/v1"  # Universal Runtime
 
 # Model definitions
 models:
-  # Function router - fast tool routing (<300ms)
+  # Tool router — any model that supports tool calling.
+  # After fine-tuning, reference trained models by ft:{job_id} alias
+  # (PR #785: ft: prefix resolved server-side, no GGUF path needed).
+  # Examples:
+  #   model: "unsloth/functiongemma-270m-it-GGUF"   # base FunctionGemma
+  #   model: "ft:911f2779"                           # fine-tuned (post-promote)
+  #   model: "local/functiongemma-ft"                # local alias (post-promote)
+  #   model: "unsloth/Qwen3-0.6B-GGUF"              # any small model
   router:
     model: "unsloth/functiongemma-270m-it-GGUF"
     temperature: 0.1

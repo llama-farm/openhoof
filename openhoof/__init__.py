@@ -48,7 +48,12 @@ from .router import (
 )
 
 # Fine-tuning — convert captured data to LlamaFarm SFT jobs
-from .finetune import FinetuneManager, JobStatus
+from .finetune import (
+    FinetuneManager,
+    JobStatus,
+    RouterDatasetBuilder,
+    ReasonerDatasetBuilder,
+)
 
 # Tool system (OpenAI-compatible schemas)
 from .tools.base import Tool, ToolContext, ToolResult
@@ -91,6 +96,8 @@ __all__ = [
     # Fine-tuning
     "FinetuneManager",
     "JobStatus",
+    "RouterDatasetBuilder",
+    "ReasonerDatasetBuilder",
 
     # Tool system
     "Tool",

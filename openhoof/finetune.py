@@ -511,6 +511,82 @@ class FinetuneManager:
         r.raise_for_status()
         return r.json()
 
+    def promote(self, job_id: str) -> Dict[str, Any]:
+        """
+        Promote a completed job — writes aliases so the trained model can be
+        referenced by ft:{job_id} or local/{base}-ft anywhere a model ID is used.
+
+        After promotion:
+            llamafarm.yaml:  router.model: "ft:911f2779"
+            ToolRouter(...,  model="ft:911f2779")
+
+        PR #785: POST /v1/finetune/jobs/{id}/promote
+        Creates ~/.llamafarm/models/llm/aliases.json mapping
+        ft:{job_id} and local/{base}-ft → absolute GGUF path.
+
+        Returns:
+            {"job_id": ..., "alias": "ft:...", "local_alias": "local/...-ft",
+             "gguf_path": "..."}
+        """
+        import requests
+
+        r = requests.post(
+            f"{self.endpoint}/finetune/jobs/{job_id}/promote",
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def eval(
+        self,
+        job_id: str,
+        holdout: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        Evaluate a trained model against a holdout dataset.
+
+        Runs inference through the same Jinja2 template path used at
+        training time (PR #785 fix — no chat_template param needed,
+        auto-applied from GGUF).
+
+        Args:
+            job_id:  Completed job to evaluate
+            holdout: List of {"messages": [...], "expected": "tool_call_str"}
+                     Each item is one eval example.
+                     expected is the exact tool call string the model should output.
+
+        Returns:
+            {"accuracy": float, "correct": int, "total": int,
+             "per_example": [{"input": ..., "expected": ..., "actual": ..., "correct": bool}]}
+
+        Example holdout item:
+            {
+                "messages": [{"role": "user", "content": "Move drone north 10m"}],
+                "expected": "drone_move(north_m=10)"
+            }
+        """
+        import requests
+
+        r = requests.post(
+            f"{self.endpoint}/finetune/jobs/{job_id}/eval",
+            json={"holdout": holdout},
+            timeout=120,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def model_alias(self, job_id: str) -> str:
+        """
+        Return the ft: alias for a job_id — usable as a model ID anywhere.
+
+        The alias is valid after promote() is called. No network call needed.
+
+        Example:
+            alias = ft.model_alias("911f2779")   # → "ft:911f2779"
+            router = ToolRouter(endpoint=..., model=alias)
+        """
+        return f"ft:{job_id}"
+
     # ── Convenience methods ────────────────────────────────────────────────────
 
     def finetune_router(
@@ -518,6 +594,8 @@ class FinetuneManager:
         training_dir: str,
         model: str = DEFAULT_ROUTER_MODEL,
         min_examples: int = 10,
+        auto_promote: bool = True,
+        wait: bool = False,
         **kwargs: Any,
     ) -> str:
         """
@@ -525,12 +603,18 @@ class FinetuneManager:
 
         Args:
             training_dir: .microclaw/training/ directory with router_*.jsonl
-            model:        Model to fine-tune (default: unsloth/functiongemma-270m-it)
-            min_examples: Minimum examples required (raises if insufficient)
+            model:        HuggingFace model to fine-tune. Any model that supports
+                          tool calling works — not just FunctionGemma.
+                          Default: unsloth/functiongemma-270m-it
+            min_examples: Minimum examples required before submitting
+            auto_promote: Call promote() after training completes (requires wait=True).
+                          Creates ft:{job_id} and local/{base}-ft aliases so the
+                          trained model can be used directly in llamafarm.yaml.
+            wait:         Block until training completes (default False — fire and forget)
             **kwargs:     Passed to submit_sft()
 
         Returns:
-            job_id
+            job_id — use ft:{job_id} as the model ID after promotion
 
         Raises:
             ValueError: If insufficient training data
@@ -553,7 +637,14 @@ class FinetuneManager:
 
         print(f"🔧 Router fine-tune: {len(dataset)} examples → {model}")
         job_id = self.submit_sft(model=model, dataset=dataset, **kwargs)
-        print(f"✅ Job submitted: {job_id}")
+        print(f"✅ Job submitted: {job_id}  (alias after promotion: ft:{job_id})")
+
+        if wait:
+            self.wait(job_id, on_progress=lambda s: print(f"   {s.progress:.0%} …"))
+            if auto_promote:
+                result = self.promote(job_id)
+                print(f"✅ Promoted: {result.get('alias')} / {result.get('local_alias')}")
+
         return job_id
 
     def finetune_reasoner(
@@ -561,6 +652,8 @@ class FinetuneManager:
         training_dir: str,
         model: str = DEFAULT_REASONER_MODEL,
         min_examples: int = 5,
+        auto_promote: bool = True,
+        wait: bool = False,
         **kwargs: Any,
     ) -> str:
         """
@@ -568,12 +661,15 @@ class FinetuneManager:
 
         Args:
             training_dir: .microclaw/training/ directory with reasoner_*.jsonl
-            model:        Model to fine-tune (default: unsloth/Qwen3-1.7B)
+            model:        HuggingFace model to fine-tune.
+                          Default: unsloth/Qwen3-1.7B
             min_examples: Minimum examples required
+            auto_promote: Call promote() after training completes (requires wait=True)
+            wait:         Block until training completes
             **kwargs:     Passed to submit_sft()
 
         Returns:
-            job_id
+            job_id — use ft:{job_id} as the model ID after promotion
 
         Raises:
             ValueError: If insufficient training data
@@ -595,12 +691,22 @@ class FinetuneManager:
 
         print(f"🧠 Reasoner fine-tune: {len(dataset)} examples → {model}")
         job_id = self.submit_sft(model=model, dataset=dataset, **kwargs)
-        print(f"✅ Job submitted: {job_id}")
+        print(f"✅ Job submitted: {job_id}  (alias after promotion: ft:{job_id})")
+
+        if wait:
+            self.wait(job_id, on_progress=lambda s: print(f"   {s.progress:.0%} …"))
+            if auto_promote:
+                result = self.promote(job_id)
+                print(f"✅ Promoted: {result.get('alias')} / {result.get('local_alias')}")
+
         return job_id
 
     def gguf_path(self, job_id: str) -> Optional[Path]:
         """
         Return the path to the trained GGUF file for a completed job.
+
+        LlamaFarm saves GGUFs to: ~/.llamafarm/models/llm/{job_id}/gguf/
+        Prefers q8_0, then q4_k_m, then any .gguf (mirrors PR #785 resolver).
 
         Returns:
             Path to the GGUF file, or None if not yet available.
@@ -608,10 +714,15 @@ class FinetuneManager:
         status = self.poll(job_id)
         if not status.output_dir:
             return None
-        # LlamaFarm saves GGUF to: {output_dir}/gguf/model-{quantization}.gguf
         gguf_dir = Path(status.output_dir) / "gguf"
-        candidates = list(gguf_dir.glob("*.gguf")) if gguf_dir.exists() else []
-        return candidates[0] if candidates else None
+        if not gguf_dir.exists():
+            return None
+        # Mirror PR #785 resolver priority: q8_0 > q4_k_m > any
+        for pattern in ("*q8_0*.gguf", "*q4_k_m*.gguf", "*.gguf"):
+            candidates = sorted(gguf_dir.glob(pattern))
+            if candidates:
+                return candidates[0]
+        return None
 
     def __repr__(self) -> str:
         return f"FinetuneManager(endpoint={self.endpoint!r})"
