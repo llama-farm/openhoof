@@ -1,0 +1,205 @@
+# OpenHoof v2.x — LLM-readable project manifest
+# Generated: 2026-03-04
+# Source: https://github.com/llama-farm/openhoof
+
+## What is OpenHoof?
+Standalone Python agent runtime library. Embodies OpenClaw patterns but runs
+anywhere: phones, edge devices, Rust daemons. No gateway service required.
+pip install openhoof
+
+## Core API
+```python
+from openhoof import Agent, bootstrap_agent, get_builtin_tool_schemas, builtin_executor, create_tool_schema
+
+agent = Agent(
+    soul="SOUL.md",           # system prompt (keep ≤200 tokens on mobile)
+    memory="MEMORY.md",       # long-term memory
+    tools=all_tools,          # list of OpenAI-format tool schemas
+    executor=my_executor,     # fn(tool_name, params) -> dict
+    workspace="./workspace",  # base path for built-in file tools
+    max_turns=10,             # max reasoning loop turns
+    router_confidence_threshold=0.85,  # FunctionGemma confidence gate
+)
+
+response = agent.reason("user task here")  # runs multi-turn loop
+```
+
+## Two-Model Orchestration
+Reasoner (Qwen3 1.7B) drives the loop and chains tool calls.
+FunctionGemma (270M) validates/normalizes each tool call — fire and forget.
+Reasoner decides WHAT; FunctionGemma validates HOW.
+
+Simple commands ("take off") can be routed directly by FunctionGemma at high confidence.
+Multi-step plans ("find horses and follow them") are owned by the Reasoner which
+calls FunctionGemma once per step.
+
+Config in llamafarm.yaml:
+  models.router.model          → FunctionGemma model
+  models.reasoning.model       → Reasoner model
+  models.router.system_prompt  → Minimal prompt for router (NOT SOUL.md)
+  models.router.confidence_threshold → float 0-1 (default 0.85)
+
+Single-model fallback: if router == reasoning in llamafarm.yaml, auto-detects
+and runs in single-model mode. No code change required.
+
+## Context Files (first-class citizens)
+SOUL.md     → system prompt. Keep ≤200 tokens. Core identity only.
+MEMORY.md   → long-term memory. Searched via memory_search built-in tool.
+USER.md     → user profile. Lazy-loaded via read_user tool.
+AGENTS.md   → operating instructions. Lazy-loaded via read_agents tool.
+TOOLS.md    → tool guidance. Lazy-loaded via read_tool_guide tool.
+IDENTITY.md → name/emoji only.
+
+Token budget strategy: system prompt = SOUL.md core (~200 tokens).
+Everything else lazy-loaded on-demand via built-in tools.
+Mobile target: 2048 total context, 200 for system → 1800 for work.
+
+## Built-in Tools (15 total, always available)
+All included via get_builtin_tool_schemas(). Executed via builtin_executor(agent, name, params).
+
+Memory:
+  memory_search(query, max_results=5)         → search MEMORY.md + daily logs (SQLite FTS)
+  memory_append(content)                      → append to MEMORY.md
+  memory_read(lines=50)                       → read raw MEMORY.md
+
+Time:
+  get_time()                                  → current ISO datetime
+
+Logging:
+  log(message, level="info")                  → write to memory/YYYY-MM-DD.md
+
+Context (lazy-loaded):
+  read_user()                                 → load USER.md
+  read_agents()                               → load AGENTS.md
+  read_tool_guide()                           → load TOOLS.md
+
+Mission lifecycle:
+  mission_start(mission_id, objective)        → open mission record
+  checkpoint(summary)                         → save progress snapshot
+  mission_complete(summary, outcome)          → archive to memory/missions/
+
+State:
+  save_state(key, value)                      → persist key/value to .microclaw/state.json
+  load_state(key)                             → restore value
+
+CLI / file / HTTP:
+  shell_exec(cmd, timeout=30)                 → shell execution (pipes/redirects work)
+  run_command(cmd, shell=False, timeout=30)   → subprocess, no shell injection
+  read_file(path, max_lines=100, offset=0)    → paginated file read
+  write_file(path, content, append=False)     → file write, auto-mkdir
+  http_request(url, method="GET", body=None)  → HTTP GET/POST/PUT/DELETE
+
+## Training Data Capture
+Every tool call auto-captured to .microclaw/training/:
+  router_YYYY-MM-DD.jsonl   → FunctionGemma fine-tuning (single-turn: intent → tool call)
+  reasoner_YYYY-MM-DD.jsonl → Qwen3 fine-tuning (full multi-turn chains)
+
+FunctionGemma training format: {"model":"router", "messages":[{"role":"user","content":"<intent>"}], "tool_call":{...}}
+Qwen3 training format:         {"model":"reasoner", "messages":[...full chain...], "turn_count":N}
+
+Query: training.stats() → {"router_samples":N, "reasoner_samples":N, "total":N}
+
+## DDIL (Denied/Degraded/Intermittent/Limited networks)
+Built-in store-and-forward buffer in .microclaw/ddil/:
+  agent.ddil.buffer(data)   → queue data when offline
+  agent.ddil.flush(url)     → sync buffered data when network returns
+Agents continue autonomously during DDIL. Sync on reconnect.
+
+## LlamaFarm Endpoints
+LlamaFarm server API: http://localhost:14345/v1
+Universal Runtime:    http://localhost:11540/v1  ← used in llamafarm.yaml
+Models: unsloth/Qwen3-1.7B-GGUF (reasoning), unsloth/functiongemma-270m-it-GGUF (router)
+
+## Tool Schema Format
+OpenAI function-calling format. create_tool_schema() helper for rich descriptions:
+
+```python
+schema = create_tool_schema(
+    name="drone_scan",
+    summary="Scan area for objects",
+    when_to_use="When searching for targets",
+    prerequisites=["Drone airborne"],
+    safety=["Verify airspace clear"],
+    parameters={
+        "type": "object",
+        "properties": {"lock_on_class": {"type": "string"}},
+        "required": []
+    }
+)
+```
+
+Output is standard OpenAI format: {"type":"function","function":{"name":"...","description":"...","parameters":{...}}}
+
+## bootstrap_agent()
+```python
+result = bootstrap_agent(
+    workspace="./my-agent",
+    name="MyBot",
+    emoji="🤖",
+    mission="Do useful things",
+    user_name="Alice",
+)
+# Creates: SOUL.md, AGENTS.md, USER.md, MEMORY.md, HEARTBEAT.md, TOOLS.md, IDENTITY.md
+```
+
+## Heartbeat System
+agent.heartbeat_interval = 30  # seconds (default)
+agent.on_exit("battery_critical", lambda: battery() < 20)
+Heartbeat runs during agent.run() event loop.
+agent.reason() is a single-shot call (no heartbeat loop).
+
+## Repository Layout
+openhoof/
+  agent.py          → Agent class, reason(), event loop
+  soul.py           → Soul.load() → system prompt
+  memory.py         → Memory + SQLite FTS search
+  heartbeat.py      → Heartbeat + exit conditions
+  events.py         → Event queue (priority-sorted)
+  tools.py          → ToolRegistry
+  ddil.py           → Store-and-forward buffer
+  training.py       → TrainingDataCapture (router + reasoner files)
+  models.py         → ModelLoader, LlamaFarmClient, RouterResult
+  tool_registry.py  → Simple tool registry (OpenAI + direct format)
+  bootstrap.py      → bootstrap_agent()
+  builtin_tools/
+    __init__.py     → get_builtin_tool_schemas(), builtin_executor()
+    memory.py       → memory_search, memory_append, memory_read
+    time_tools.py   → get_time
+    logging.py      → log, read_logs
+    state.py        → save_state, load_state, list_state
+    context.py      → read_user, read_agents, read_tool_guide, get_context_stats
+    mission.py      → mission_start, checkpoint, mission_complete
+    tool_schema.py  → create_tool_schema()
+    cli.py          → shell_exec, run_command, read_file, write_file
+    http_tools.py   → http_request
+  templates/        → SOUL.md, AGENTS.md, USER.md, HEARTBEAT.md, TOOLS.md, IDENTITY.md
+training/
+  pipeline.py       → FunctionGemma fine-tuning pipeline (THE GOLD — do not delete)
+examples/
+  basic-agent/      → Minimal agent (SOUL+MEMORY+builtins only)
+  drone-agent/      → Autonomous drone (HTTP direct + two-model + DDIL)
+  customer-support/ → CRM-style chaining (lookup→ticket→update→close)
+  fuel-analyst/     → C-17 fuel analysis (domain-specific chaining)
+  orchestrator/     → Multi-specialist coordinator (spawn→delegate→synthesize)
+
+## Version History
+v2.0.0  Rebuilt as standalone library (removed FastAPI server, -4939 lines)
+v2.1.0  Two-model orchestration (Reasoner + FunctionGemma)
+v2.1.1  Logprob-based confidence scoring
+v2.1.2  shell_exec + http_request built-in tools
+v2.1.3  Training data architecture (router/reasoner split)
+v2.1.4  Two-model shared state fixes (router system prompt, step intent, focused context)
+v2.1.5  Bug fix: None content guard in step_intent extraction
+
+## What was removed (v1.x → v2.x)
+- FastAPI server (openhoof/api/)
+- WebSocket server
+- CLI commands (openhoof/cli/)
+- Old session/transcript/workspace management (openhoof/core/)
+- Old agent lifecycle (openhoof/agents/)
+- Old LlamaFarm adapter (openhoof/inference/)
+
+## What was preserved
+- training/pipeline.py — FunctionGemma training pipeline (unchanged)
+- tools/base.py + tools/registry.py — Tool base classes
+- OpenAI-compatible tool schema format
