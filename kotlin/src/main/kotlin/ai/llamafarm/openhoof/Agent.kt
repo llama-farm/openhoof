@@ -5,64 +5,54 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.serialization.json.*
 
 /**
- * Agent — the core runtime loop.
+ * Agent — core runtime loop.
  *
- * Wires together Soul + Memory + ToolRegistry + ModelClient into an agent
- * that can:
- *   - Maintain conversation history
- *   - Run multi-turn reasoning loops (LLM → tool call → result → LLM → ...)
- *   - Route single queries through a fast router (FunctionGemma)
- *   - Process an event queue
- *   - Run a heartbeat on a configurable interval
- *   - Capture every tool call as training data (JSONL)
+ * Works entirely on-device with LocalCompletionProvider.
+ * No LlamaFarm, no network required.
  *
- * Usage — simple one-shot:
+ * Usage — on-device only:
  *   val agent = Agent.build {
- *     soul    = Soul.fromFile("SOUL.md")
- *     memory  = Memory.fromFile("MEMORY.md")
- *     client  = ModelClient(endpoint = "http://192.168.1.5:11540/v1", model = "ft:da674646")
+ *     soul     = Soul.fromFile("SOUL.md")
+ *     memory   = Memory.fromFile("MEMORY.md")
+ *     provider = LocalCompletionProvider(modelPath = "/data/models/functiongemma-270m")
  *     tools(registry)
  *   }
- *   val result = agent.route("switch vlans")   // single FunctionGemma call
- *   val answer = agent.reason("what vlans are on the switch?")  // multi-turn
+ *   val result = agent.route("switch vlans")
  *
- * Usage — event loop:
- *   agent.on("battery_low") { agent.stop() }
- *   agent.heartbeatInterval = 30
- *   agent.run()   // blocks until stopped
+ * Usage — hybrid (local first, remote fallback):
+ *   val agent = Agent.build {
+ *     provider = HybridCompletionProvider(
+ *       primary   = LocalCompletionProvider(modelPath = "/data/models/functiongemma-270m"),
+ *       secondary = RemoteCompletionProvider(endpoint  = "http://192.168.1.5:11540/v1"),
+ *     )
+ *   }
  */
 class Agent private constructor(
     val soul: Soul,
     val memory: Memory,
-    val client: ModelClient,
+    val provider: CompletionProvider,
     val registry: ToolRegistry,
-    val trainingLog: String? = null,          // path to JSONL file; null = disabled
-    val heartbeatInterval: Int = 30,          // seconds; 0 = disabled
+    val trainingLog: String? = null,
+    val heartbeatInterval: Int = 30,
     val maxReasoningTurns: Int = 10,
     val stripToolDescriptions: Boolean = true,
 ) {
-    // Conversation history (grows across reason() calls)
     private val history = mutableListOf<ChatMessage>()
-
-    // Event queue
-    private val events = Channel<AgentEvent>(capacity = Channel.UNLIMITED)
-
-    // Heartbeat + exit condition handlers
+    private val events  = Channel<AgentEvent>(capacity = Channel.UNLIMITED)
     private val heartbeatHandlers = mutableListOf<suspend () -> Unit>()
     private val exitConditions    = mutableListOf<() -> Boolean>()
-
     private var running = false
     private var scope: CoroutineScope? = null
 
     // ── Public API ────────────────────────────────────────────────────────────
 
     /**
-     * Route a single query through the router model (FunctionGemma).
-     * Fast path — no conversation history, no multi-turn.
-     * Returns the tool call result, or null if no tool matched.
+     * Route a single query through the model (fast path).
+     * Uses FunctionGemma on-device or remote — whichever provider is configured.
+     * No conversation history, no multi-turn.
      */
     suspend fun route(query: String): RouteResult {
-        val result = client.complete(
+        val result = provider.complete(
             messages = listOf(
                 ChatMessage.system(soul.systemPrompt),
                 ChatMessage.user(query),
@@ -72,77 +62,57 @@ class Agent private constructor(
         )
 
         val call = result.firstTool ?: return RouteResult(
-            query = query,
-            toolCall = null,
-            output = null,
-            rawContent = result.content,
+            query = query, toolCall = null, output = null, rawContent = result.content,
         )
 
         logTraining(query, call)
 
         val output = registry.executeSafe(call.name, call.params)
-
-        return RouteResult(
-            query = query,
-            toolCall = call,
-            output = output,
-            rawContent = result.content,
-        )
+        return RouteResult(query = query, toolCall = call, output = output, rawContent = result.content)
     }
 
     /**
      * Multi-turn reasoning loop.
-     * LLM sees tool results and decides next steps until it stops calling tools.
-     * Conversation history is maintained across calls.
+     * The model sees tool results and decides next steps until it stops calling tools.
      */
     suspend fun reason(prompt: String): String {
-        // Ensure system message is at the start
         if (history.isEmpty()) {
             val systemContent = buildString {
                 appendLine(soul.systemPrompt)
                 if (!memory.isEmpty) {
                     appendLine()
-                    appendLine("## Memory")
-                    // Inject relevant memory snippets
                     val snippets = memory.search(prompt, maxResults = 3)
-                    if (snippets.isNotEmpty()) {
-                        snippets.forEach { appendLine(it.text) }
-                    } else {
-                        append(memory.summary(maxChars = 1000))
-                    }
+                    if (snippets.isNotEmpty()) snippets.forEach { appendLine(it.text) }
+                    else append(memory.summary(maxChars = 1000))
                 }
             }
             history.add(ChatMessage.system(systemContent))
         }
-
         history.add(ChatMessage.user(prompt))
 
         val tools = registry.schemas.toList().map { it.jsonObject }
 
-        repeat(maxReasoningTurns) { turn ->
-            val result = client.complete(
+        repeat(maxReasoningTurns) {
+            val result = provider.complete(
                 messages = history,
                 tools = if (registry.size > 0) tools else null,
                 stripToolDescriptions = stripToolDescriptions,
             )
 
-            // No tool call → final answer
             if (!result.hasToolCall) {
                 val content = result.content ?: "Done."
                 history.add(ChatMessage.assistant(content))
                 return content
             }
 
-            // Process tool calls
-            val assistantMsg = buildAssistantMessage(result)
-            history.add(assistantMsg)
+            history.add(buildAssistantMessage(result))
 
             result.toolCalls.forEach { call ->
                 logTraining(prompt, call)
                 val toolResult = registry.executeSafe(call.name, call.params)
                 val resultStr = when (toolResult) {
-                    is ToolResult.Success    -> formatResult(toolResult.value)
-                    is ToolResult.Error      -> "Error: ${toolResult.message}"
+                    is ToolResult.Success     -> formatResult(toolResult.value)
+                    is ToolResult.Error       -> "Error: ${toolResult.message}"
                     is ToolResult.UnknownTool -> "Error: unknown tool '${call.name}'"
                 }
                 history.add(ChatMessage.tool(id = call.id, content = resultStr))
@@ -152,79 +122,37 @@ class Agent private constructor(
         return "Max reasoning turns reached."
     }
 
-    /**
-     * Push an event into the agent's event queue.
-     * If the agent loop is running, it will process this event.
-     */
-    fun emit(event: AgentEvent) {
-        events.trySend(event)
-    }
+    fun emit(event: AgentEvent) { events.trySend(event) }
+    fun emit(name: String, data: Map<String, Any> = emptyMap()) = emit(AgentEvent(name, data))
 
-    fun emit(name: String, data: Map<String, Any> = emptyMap()) {
-        emit(AgentEvent(name = name, data = data))
-    }
+    fun onHeartbeat(handler: suspend () -> Unit) { heartbeatHandlers.add(handler) }
+    fun onExit(condition: () -> Boolean) { exitConditions.add(condition) }
 
-    /** Register a handler that fires on every heartbeat. */
-    fun onHeartbeat(handler: suspend () -> Unit) {
-        heartbeatHandlers.add(handler)
-    }
-
-    /** Register an exit condition. Agent stops when any returns true. */
-    fun onExit(condition: () -> Boolean) {
-        exitConditions.add(condition)
-    }
-
-    /**
-     * Run the agent event loop (blocking / suspend).
-     * Processes events and fires heartbeats until stopped.
-     */
     suspend fun run() {
         running = true
         scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-        // Start heartbeat
-        val heartbeatJob = if (heartbeatInterval > 0) {
-            scope!!.launch {
-                while (running) {
-                    delay(heartbeatInterval * 1000L)
-                    if (!running) break
-                    heartbeatHandlers.forEach { it() }
-                    if (exitConditions.any { it() }) {
-                        stop()
-                    }
-                }
+        val heartbeatJob = if (heartbeatInterval > 0) scope!!.launch {
+            while (running) {
+                delay(heartbeatInterval * 1000L)
+                heartbeatHandlers.forEach { it() }
+                if (exitConditions.any { it() }) stop()
             }
         } else null
 
-        // Process events
         while (running) {
             val event = try {
                 withTimeoutOrNull(1000) { events.receive() }
-            } catch (e: Exception) {
-                null
-            } ?: continue
-
-            try {
-                processEvent(event)
-            } catch (e: Exception) {
-                // Log but don't crash the loop
-            }
+            } catch (e: Exception) { null } ?: continue
+            try { processEvent(event) } catch (e: Exception) { /* log, don't crash */ }
         }
 
         heartbeatJob?.cancel()
         scope?.cancel()
     }
 
-    /** Stop the agent loop. */
-    fun stop() {
-        running = false
-        scope?.cancel()
-    }
-
-    /** Reset conversation history. */
-    fun resetHistory() {
-        history.clear()
-    }
+    fun stop() { running = false; scope?.cancel() }
+    fun resetHistory() { history.clear() }
 
     // ── Internal ──────────────────────────────────────────────────────────────
 
@@ -233,10 +161,7 @@ class Agent private constructor(
             "query"  -> route(event.data["text"] as? String ?: return)
             "reason" -> reason(event.data["text"] as? String ?: return)
             "stop"   -> stop()
-            else     -> {
-                // Route unknown events as queries
-                route("${event.name}: ${event.data}")
-            }
+            else     -> route("${event.name}: ${event.data}")
         }
     }
 
@@ -247,65 +172,48 @@ class Agent private constructor(
                 put("type", "function")
                 putJsonObject("function") {
                     put("name", call.name)
-                    put("arguments", Json.encodeToString(
-                        JsonObject.serializer(),
-                        buildJsonObject {
-                            call.params.forEach { (k, v) ->
-                                when (v) {
-                                    is String  -> put(k, v)
-                                    is Boolean -> put(k, v)
-                                    is Number  -> put(k, v.toDouble())
-                                    else       -> put(k, v.toString())
-                                }
+                    put("arguments", Json.encodeToString(JsonObject.serializer(), buildJsonObject {
+                        call.params.forEach { (k, v) ->
+                            when (v) {
+                                is String  -> put(k, v)
+                                is Boolean -> put(k, v)
+                                is Number  -> put(k, v.toDouble())
+                                else       -> put(k, v.toString())
                             }
                         }
-                    ))
+                    }))
                 }
             }
         }
-        return ChatMessage(
-            role = "assistant",
-            content = result.content,
-            toolCalls = toolCallsJson,
-        )
+        return ChatMessage(role = "assistant", content = result.content, toolCalls = toolCallsJson)
     }
 
     private fun formatResult(value: Any?): String = when (value) {
-        null       -> "null"
-        is String  -> value
-        is Map<*, *>, is List<*> -> Json.encodeToString(
-            JsonElement.serializer(),
-            anyToJson(value)
-        )
-        else -> value.toString()
+        null        -> "null"
+        is String   -> value
+        is Map<*, *>, is List<*> -> Json.encodeToString(JsonElement.serializer(), anyToJson(value))
+        else        -> value.toString()
     }
 
     private fun anyToJson(value: Any?): JsonElement = when (value) {
-        null        -> JsonNull
-        is String   -> JsonPrimitive(value)
-        is Boolean  -> JsonPrimitive(value)
-        is Number   -> JsonPrimitive(value.toDouble())
-        is Map<*, *> -> buildJsonObject {
-            value.forEach { (k, v) -> put(k.toString(), anyToJson(v)) }
-        }
-        is List<*>  -> buildJsonArray { value.forEach { add(anyToJson(it)) } }
-        else        -> JsonPrimitive(value.toString())
+        null         -> JsonNull
+        is String    -> JsonPrimitive(value)
+        is Boolean   -> JsonPrimitive(value)
+        is Number    -> JsonPrimitive(value.toDouble())
+        is Map<*, *> -> buildJsonObject { value.forEach { (k, v) -> put(k.toString(), anyToJson(v)) } }
+        is List<*>   -> buildJsonArray { value.forEach { add(anyToJson(it)) } }
+        else         -> JsonPrimitive(value.toString())
     }
 
     private fun logTraining(input: String, call: ToolCall) {
         val path = trainingLog ?: return
         val paramsStr = call.params.entries.joinToString(", ") { (k, v) ->
-            val vStr = when (v) {
-                is String -> "\"$v\""
-                else -> v.toString()
-            }
-            "$k=$vStr"
+            "$k=${if (v is String) "\"$v\"" else v}"
         }
-        val output = "${call.name}($paramsStr)"
         val line = buildJsonObject {
             putJsonArray("conversations") {
                 addJsonObject { put("from", "human"); put("value", input) }
-                addJsonObject { put("from", "gpt");   put("value", output) }
+                addJsonObject { put("from", "gpt");   put("value", "${call.name}($paramsStr)") }
             }
         }
         java.io.File(path).appendText(Json.encodeToString(JsonObject.serializer(), line) + "\n")
@@ -320,7 +228,7 @@ class Agent private constructor(
     class Builder {
         var soul: Soul = Soul.inline("Agent")
         var memory: Memory = Memory.empty()
-        var client: ModelClient = ModelClient()
+        var provider: CompletionProvider = RemoteCompletionProvider()
         var registry: ToolRegistry = ToolRegistry()
         var trainingLog: String? = null
         var heartbeatInterval: Int = 30
@@ -329,26 +237,35 @@ class Agent private constructor(
 
         fun tools(r: ToolRegistry) { registry = r }
 
+        // Convenience: set a local engine directly
+        fun localModel(engine: LocalInferenceEngine, maxTokens: Int = 64) {
+            provider = LocalCompletionProvider(engine = engine, maxNewTokens = maxTokens)
+        }
+
+        // Convenience: set remote endpoint directly
+        fun remoteModel(endpoint: String, model: String) {
+            provider = RemoteCompletionProvider(endpoint = endpoint, model = model)
+        }
+
+        // Convenience: local first, remote fallback
+        fun hybridModel(engine: LocalInferenceEngine, remoteEndpoint: String, remoteModel: String) {
+            provider = HybridCompletionProvider(
+                primary   = LocalCompletionProvider(engine = engine),
+                secondary = RemoteCompletionProvider(endpoint = remoteEndpoint, model = remoteModel),
+            )
+        }
+
         fun build() = Agent(
-            soul = soul,
-            memory = memory,
-            client = client,
-            registry = registry,
-            trainingLog = trainingLog,
-            heartbeatInterval = heartbeatInterval,
-            maxReasoningTurns = maxReasoningTurns,
-            stripToolDescriptions = stripToolDescriptions,
+            soul = soul, memory = memory, provider = provider, registry = registry,
+            trainingLog = trainingLog, heartbeatInterval = heartbeatInterval,
+            maxReasoningTurns = maxReasoningTurns, stripToolDescriptions = stripToolDescriptions,
         )
     }
 }
 
 // ── Supporting types ──────────────────────────────────────────────────────────
 
-data class AgentEvent(
-    val name: String,
-    val data: Map<String, Any> = emptyMap(),
-    val priority: Int = 0,
-)
+data class AgentEvent(val name: String, val data: Map<String, Any> = emptyMap(), val priority: Int = 0)
 
 data class RouteResult(
     val query: String,
